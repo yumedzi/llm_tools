@@ -1,0 +1,129 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { allocationTotal, characterCount, compactEntries, compareModelTokens, contextPreset, conversationOutputTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, models, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
+import { countClaudeTokens, countOpenAITokens } from '../src/tokenizers.ts';
+import type { FlowEntry } from '../src/logic.ts';
+const call = (tokens = 2400, id = 1): FlowEntry => ({ id, kind: 'mcp-result', name: 'Search', tokens, originalTokens: tokens, summarized: false, toolId: 'search' });
+
+describe('Token estimates and counters', () => {
+  it('returns zero for empty input for every model', () => {
+    assert.equal(estimateTokens(''), 0);
+    assert.deepEqual(compareModelTokens(''), models.map(() => 0));
+  });
+  it('estimates prose, code, whitespace, and multilingual text deterministically', () => {
+    for (const text of [...Object.values(samples), '   ', '\n\n', '你好', 'こんにちは', 'café', '🚀']) {
+      const count = estimateTokens(text);
+      assert.ok(Number.isSafeInteger(count) && count > 0);
+      assert.equal(estimateTokens(text), count);
+    }
+  });
+  it('counts code points rather than surrogate halves as characters', () => {
+    assert.equal(characterCount('a🚀é'), 3);
+    assert.equal(characterCount(''), 0);
+  });
+  it('uses transparent whitespace-separated word counts', () => {
+    assert.equal(wordCount(''), 0);
+    assert.equal(wordCount(' \n '), 0);
+    assert.equal(wordCount('one\n two\tthree'), 3);
+  });
+  it('handles 100,000 characters without invalid counts', () => {
+    assert.ok(estimateTokens('a'.repeat(100000)) > 0);
+  });
+  it('routes Claude through ctoc and OpenAI and Grok through o200k_base', () => {
+    const text = samples.multilingual;
+    const expected = models.map(model => Math.ceil((model.tokenizer === 'ctoc' ? countClaudeTokens(text) : countOpenAITokens(text)) * model.countAdjustment));
+    assert.deepEqual(compareModelTokens(text), expected);
+    assert.equal(models[0].name, 'Fable 5.1');
+    assert.deepEqual(models.filter(model => model.family === 'OpenAI').map(model => model.name), ['GPT 5.6 (Sol / Terra / Luna)']);
+    assert.equal(models.at(-1)?.name, 'Grok 4.6');
+    const haiku = models.find(model => model.name === 'Claude Haiku 4.5')!;
+    assert.equal(haiku.countAdjustment, 0.7);
+    assert.equal(countModelTokens(text, haiku), Math.ceil(countClaudeTokens(text) * 0.7));
+  });
+  it('uses checked-in standard input pricing for every displayed model', () => {
+    const byId = Object.fromEntries(models.map(model => [model.id, model]));
+    assert.deepEqual(byId['fable-5-1'].pricing[0], { label: 'Standard', input: 10, cachedInput: 0.25, output: 50 });
+    assert.deepEqual(byId['claude-sonnet-5'].pricing[0], { label: 'Standard', input: 2, cachedInput: 0.2, output: 10 });
+    assert.deepEqual(byId['claude-haiku-4.5'].pricing[0], { label: 'Standard', input: 1, cachedInput: 0.1, output: 5 });
+    assert.deepEqual(byId['gpt-5-6-family'].pricing.map(price => price.input), [4, 2, 0.2]);
+    assert.deepEqual(byId['grok-4.6'].pricing[0], { label: 'Under 200K context', input: 2, cachedInput: 0.5, output: 6 });
+    assert.equal(inputCost(1000000, byId['gpt-5-6-family'].pricing[2]), 0.2);
+  });
+  it('preserves the full original text when visual pieces are joined', () => {
+    for (const text of [...Object.values(samples), ' abc\n🚀déjà\t你好! ', '']) {
+      assert.equal(visualChunks(text).join(''), text);
+    }
+  });
+});
+
+describe('Context allocations', () => {
+  it('keeps the shared teaching profile within its window', () => {
+    const amounts = fitAllocations(contextPreset, 200000);
+    assert.deepEqual(amounts, contextPreset);
+    assert.ok(allocationTotal(amounts) < 200000);
+  });
+  it('keeps a three-percent compaction buffer outside available context', () => {
+    assert.equal(reservedContextBuffer(200000), 6000);
+    assert.equal(200000 - allocationTotal(contextPreset) - reservedContextBuffer(200000), 145910);
+  });
+  it('clamps overflow and negative allocations', () => {
+    assert.deepEqual(fitAmounts([-50, 80, 80, 5], 100), [0, 80, 20, 0]);
+  });
+  it('sanitizes nonfinite values and supports zero capacity', () => {
+    assert.deepEqual(fitAmounts([NaN, Infinity, 5], 10), [0, 0, 5]);
+    assert.deepEqual(fitAmounts([10, 20], 0), [0, 0]);
+  });
+});
+
+describe('Retained tool and skill context', () => {
+  it('starts with an explicit 18.8K Claude Code teaching baseline', () => {
+    assert.equal(flowUsed([]), flowBase);
+    assert.equal(flowBase, 18800);
+    assert.deepEqual(flowBootEntries.map(entry => entry.tokens), [7800, 10000, 600, 240, 160]);
+  });
+  it('generates assistant outputs between 2K and 3K tokens', () => {
+    assert.equal(conversationOutputTokens(() => 0), 2000);
+    assert.equal(conversationOutputTokens(() => 0.999999), 3000);
+    assert.equal(conversationOutputTokens(() => 1), 3000);
+  });
+  it('accumulates identical calls as separate retained responses', () => {
+    const first = retainCall([], call())!;
+    const second = retainCall(first, call(2400, 2))!;
+    assert.equal(second.length, 2);
+    assert.equal(flowUsed(second), flowBase + 4800);
+    assert.equal(first.length, 1);
+  });
+  it('allows exact capacity and rejects overflow without partial entries', () => {
+    const full = retainCall([], call(flowCapacity - flowBase))!;
+    assert.equal(flowUsed(full), flowCapacity);
+    assert.equal(retainCall(full, call(1, 2)), null);
+    assert.equal(full.length, 1);
+  });
+  it('compacts once without repeatedly shrinking existing summaries', () => {
+    const original = [call(2400), call(900, 2)];
+    const compacted = compactEntries(original);
+    assert.deepEqual(compacted.map(e => e.tokens), [600, 225]);
+    assert.ok(compacted.every(e => e.summarized));
+    assert.deepEqual(compactEntries(compacted), compacted);
+    assert.equal(original[0].tokens, 2400);
+    assert.equal(compacted[0].originalTokens, 2400);
+  });
+  it('allows new calls after compaction and summarizes only new entries', () => {
+    const first = compactEntries([call(2400)]);
+    const next = retainCall(first, call(900, 2))!;
+    const result = compactEntries(next);
+    assert.deepEqual(result.map(e => e.tokens), [600, 225]);
+  });
+  it("tracks one full MCP schema before each tool's retained results", () => {
+    const schema: FlowEntry = { id: 1, kind: 'mcp-schema', name: 'Search schema loaded', tokens: flowMcpTools.search.schemaTokens, originalTokens: flowMcpTools.search.schemaTokens, summarized: false, toolId: 'search' };
+    const withSchema = retainCall([], schema)!;
+    assert.equal(hasLoadedMcpSchema(withSchema, 'search'), true);
+    assert.equal(hasLoadedMcpSchema(withSchema, 'database'), false);
+  });
+  it('marks prior conversation rounds cached without reducing their tokens', () => {
+    const first = retainConversation([], { id: 1, kind: 'message', name: 'Conversation round', tokens: 600, originalTokens: 600, summarized: false })!;
+    const second = retainConversation(first, { id: 2, kind: 'message', name: 'Conversation round', tokens: 600, originalTokens: 600, summarized: false })!;
+    assert.deepEqual(second.map(entry => [entry.round, entry.cached]), [[1, true], [2, false]]);
+    assert.equal(flowUsed(second), flowBase + 1200);
+  });
+});
