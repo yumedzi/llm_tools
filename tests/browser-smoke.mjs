@@ -40,7 +40,11 @@ try {
   check('Cleared text produces zero counts and bars', '[...document.querySelectorAll(".bar-track")].every(e=>+e.getAttribute("aria-valuenow")===0)');
   button('Multilingual');
   check('Unicode sample is loaded', 'document.querySelector("textarea").value.includes("こんにちは")');
-  button('Cost'); button('Pricing'); snapshot();
+  button('Cost');
+  check('Cost direction controls are separate from display mode', 'document.querySelector("[aria-label=\\"Cost token direction\\"]")?.textContent.includes("Input") && document.querySelector("[aria-label=\\"Cost token direction\\"]")?.textContent.includes("Output")');
+  button('Output');
+  check('Output cost mode updates chart copy', 'document.querySelector(".chart-description").textContent.includes("output cost")');
+  button('Input'); button('Pricing'); snapshot();
   check('Pricing lists hard-coded provider rates', 'document.querySelector(".pricing-table").textContent.includes("$10.00") && document.querySelector(".pricing-table").textContent.includes("$0.20")');
   button('Pricing'); button('Tokens'); button('Prose'); noOverflow('Desktop tokenizer');
   capture('desktop-tokenizer.png');
@@ -61,6 +65,18 @@ try {
   capture('desktop-context.png');
 
   nav('MCP & skill flow 03');
+  check('Trail auto-scroll is enabled by default', 'document.querySelector(".trail-auto-scroll input").checked');
+  check('Flow pricing estimate stays hidden until requested', '!document.querySelector(".flow-pricing-popover")');
+  activate('[aria-label="Open pricing settings"]');
+  check('Flow pricing lists all input, cached input, and output rates', 'document.querySelector(".flow-pricing-popover").textContent.includes("input at") && document.querySelector(".flow-pricing-popover").textContent.includes("cached at") && document.querySelector(".flow-pricing-popover").textContent.includes("output at")');
+  check('Flow model menu includes GPT-6 Astra before GPT 5.6 tiers', '(() => { const labels=[...document.querySelector("[aria-label=\\"Model tier for request cost\\"]").options].map(option=>option.textContent); return labels.indexOf("GPT-6 Astra") >= 0 && labels.indexOf("GPT-6 Astra") < labels.indexOf("GPT 5.6 (Sol / Terra / Luna) - Sol"); })()');
+  check('Flow pricing reference stays hidden until requested', '!document.querySelector(".flow-pricing-table-wrap")');
+  button('Pricing');
+  check('Flow pricing reference opens on demand', '!!document.querySelector(".flow-pricing-reference .pricing-table")');
+  activate('[aria-label="Show request cost"]');
+  check('Flow request cost switch shows the current estimate', 'document.querySelector(".flow-price-preview").textContent.startsWith("$")');
+  activate('.retention-meter .meter-segment:first-child');
+  check('Flow meter segments provide hover explanations', 'document.querySelector("[role=tooltip]").textContent.includes("Boot context")');
   activate( '.call-list > div:first-child .call-button'); settle();
   check('Flow starts at explicit boot context plus first MCP schema and result', 'document.querySelector(".retention-meter").getAttribute("aria-valuenow")==="23600" && document.querySelectorAll(".timeline-entry:not(.baseline-entry)").length===2');
   activate( '.call-list > div:first-child .call-button'); settle();
@@ -68,7 +84,7 @@ try {
   activate( '.call-list > div:nth-child(3) .call-button'); settle();
   check('Skill output adds context without duplicating boot header', 'document.querySelector(".retention-meter").getAttribute("aria-valuenow")==="27800"');
   button('Compact session');
-  check('Compaction frees 75% of retained entries and preserves boot context', 'document.querySelector(".retention-meter").getAttribute("aria-valuenow")==="21050" && document.querySelectorAll(".is-compacted").length===4');
+  check('Compaction keeps boot context and one aggregate session summary', 'document.querySelector(".retention-meter").getAttribute("aria-valuenow")==="21050" && document.querySelectorAll(".is-compacted").length===1 && document.querySelectorAll(".timeline-entry:not(.baseline-entry)").length===1 && document.querySelector(".timeline-entry:not(.baseline-entry)").textContent.includes("Session summary")');
   check('Existing summaries cannot be repeatedly compacted', '[...document.querySelectorAll("button")].find(e=>e.textContent==="Compact session").disabled');
   capture('desktop-flow.png');
   button('New session'); snapshot(); button('Clear');
@@ -76,6 +92,9 @@ try {
   activate('.call-list > div:nth-child(5) .call-button'); settle();
   activate('.call-list > div:nth-child(5) .call-button'); settle();
   check('Conversation retains randomized output and caches older rounds', '(() => { const used=+document.querySelector(".retention-meter").getAttribute("aria-valuenow"); const timeline=document.querySelector(".flow-timeline").textContent; return used>=24000 && used<=26000 && document.querySelectorAll(".retained-tag.is-cached").length===1 && timeline.includes("round 2") && timeline.includes("600 input +") && timeline.includes("assistant output"); })()');
+  button('New session'); snapshot(); button('Clear');
+  activate('.call-list > div:nth-child(6) .call-button'); settle();
+  check('Image attachment retains visual tokens alongside text and output', '(() => { const used=+document.querySelector(".retention-meter").getAttribute("aria-valuenow"); const timeline=document.querySelector(".flow-timeline").textContent; return used>=22960 && used<=23960 && timeline.includes("Attach image") && timeline.includes("1,560 image visual tokens"); })()');
   button('New session'); snapshot(); button('Clear');
   noOverflow('Desktop MCP lab');
 

@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from 'react';
 import { CircleHelp, Info } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 export function usePersistentState<T>(key: string, initial: T, validator?: (value: unknown) => value is T) {
@@ -24,4 +24,14 @@ export function InfoTooltip({ label, children }: { label: string; children: Reac
     <button type="button" className="info-tooltip-trigger" aria-label={label} aria-describedby={open ? id : undefined} aria-expanded={open} onClick={() => setOpen(true)} onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}><CircleHelp size={14} aria-hidden="true" /></button>
     {open && <span id={id} className="info-tooltip-content" role="tooltip">{children}</span>}
   </span>;
+}
+
+export function HoverTooltip({ label, children, as: Element = 'span', className = '', style }: { label: ReactNode; children: ReactNode; as?: 'span' | 'div'; className?: string; style?: CSSProperties }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return <Element className={`hover-tooltip ${className}`} style={style} tabIndex={0} aria-describedby={open ? id : undefined}
+    onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>
+    {children}
+    {open && <span id={id} className="hover-tooltip-content" role="tooltip">{label}</span>}
+  </Element>;
 }

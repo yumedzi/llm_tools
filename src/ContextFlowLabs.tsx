@@ -13,6 +13,7 @@ import {
   FileText,
   Gauge,
   History,
+  Image,
   Info,
   Layers3,
   Lightbulb,
@@ -21,6 +22,7 @@ import {
   RotateCcw,
   Search,
   Settings2,
+  SlidersHorizontal,
   Sparkles,
   Terminal,
   WandSparkles,
@@ -34,6 +36,8 @@ import {
   contextCapacityOptions,
   contextColors,
   contextPreset,
+  conversationImageInputTokens,
+  conversationImageTokens,
   conversationInputTokens,
   conversationOutputTokens,
   fitAllocations,
@@ -44,8 +48,10 @@ import {
   flowUsed,
   formatNumber,
   hasLoadedMcpSchema,
+  modelPriceOptions,
   retainCall,
   retainConversation,
+  requestCost,
   reservedContextBuffer,
 } from "./logic";
 import type {
@@ -56,11 +62,13 @@ import type {
 } from "./logic";
 import {
   IconButton,
+  HoverTooltip,
   InfoTooltip,
   SectionLabel,
   TooltipNote,
   usePersistentState,
 } from "./ui";
+import { PricingSources, PricingTable } from "./PricingReference";
 
 const contextItems = [
   {
@@ -510,8 +518,20 @@ const callTypes = [
     name: "Continue conversation",
     detail: "600 input + 2-3K assistant output",
     resultTokens: 0,
+    inputTokens: conversationInputTokens,
     icon: MessageSquare,
     color: "#90d9c1",
+  },
+  {
+    id: "image",
+    kind: "message" as const,
+    name: "Attach image",
+    detail: "600 text + 1.56K image + 2-3K assistant output",
+    resultTokens: 0,
+    inputTokens: conversationImageInputTokens,
+    imageTokens: conversationImageTokens,
+    icon: Image,
+    color: "#ef9fca",
   },
 ];
 const validEntries = (value: unknown): value is FlowEntry[] =>
@@ -541,6 +561,28 @@ const entryColor = (entry: FlowEntry): string =>
       : entry.kind === "skill-result"
         ? "#b19aff"
         : "#90d9c1";
+const isFlowModelPriceOption = (value: unknown): value is string =>
+  typeof value === "string" &&
+  modelPriceOptions.some((option) => option.id === value);
+function flowEntryExplanation(entry: FlowEntry) {
+  if (entry.summarized) {
+    return "Compacted summary: the host replaced the original retained content with a shorter summary, freeing context but losing detail.";
+  }
+  if (entry.kind === "mcp-schema") {
+    return "MCP schema: the model receives the tool name, description, and parameter contract so it can construct valid calls. This simulator loads it once per tool.";
+  }
+  if (entry.kind === "mcp-result") {
+    return "MCP result: the tool's returned data remains available to later turns while the host keeps it in context.";
+  }
+  if (entry.kind === "skill-result") {
+    return "Skill result: output from a reusable instruction package. Its skill header was already available at session boot.";
+  }
+  return entry.cached
+    ? "Cached message: an older conversation round retained by the host. It still uses context space, but can qualify for a cached-input price." 
+    : entry.imageTokens
+      ? "Image attachment: a text instruction plus image visual tokens and generated assistant output retained for later turns. This simulation uses a standard-tier 1920x1080 image at 1,560 visual tokens."
+      : "Current message: the latest conversation round, including the user's input and generated assistant output, retained for the next turn.";
+}
 
 export function FlowLabView() {
   const [entries, setEntries] = usePersistentState<FlowEntry[]>(
@@ -553,13 +595,51 @@ export function FlowLabView() {
     "This session starts with system, deferred-MCP, and skill-header context.",
   );
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [showRequestCost, setShowRequestCost] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
+  const [showRates, setShowRates] = useState(false);
+  const [autoScroll, setAutoScroll] = usePersistentState(
+    "context-lab:flow-auto-scroll:v1",
+    true,
+    (value): value is boolean => typeof value === "boolean",
+  );
+  const [modelOptionId, setModelOptionId] = usePersistentState<string>(
+    "context-lab:flow-model:v1",
+    "claude-sonnet-5-Standard",
+    isFlowModelPriceOption,
+  );
+  const [useCachedInputRate, setUseCachedInputRate] = usePersistentState(
+    "context-lab:flow-cached-input-rate:v1",
+    true,
+    (value): value is boolean => typeof value === "boolean",
+  );
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pricingAnchor = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
     },
     [],
   );
+  useEffect(() => {
+    if (!showPricing) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !pricingAnchor.current?.contains(event.target)
+      ) {
+        setShowPricing(false);
+      }
+    };
+    window.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [showPricing]);
+  useEffect(() => {
+    if (!autoScroll || !entries.length) return;
+    const timeline = timelineRef.current;
+    timeline?.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
+  }, [autoScroll, entries.length]);
   const used = flowUsed(entries);
   const percent = (used / flowCapacity) * 100;
   const mcp = entries
@@ -573,12 +653,27 @@ export function FlowLabView() {
   const cachedMessages = entries
     .filter((entry) => entry.kind === "message" && entry.cached)
     .reduce((total, entry) => total + entry.tokens, 0);
+  const selectedModel =
+    modelPriceOptions.find((option) => option.id === modelOptionId) ??
+    modelPriceOptions[0];
+  const cachedInputTokens = useCachedInputRate ? used : 0;
+  const pricedInputTokens = used - cachedInputTokens;
+  const nextOutputTokens = 2500;
+  const nextRequestCost = (retainedTokens: number) =>
+    requestCost(
+      useCachedInputRate ? 0 : retainedTokens,
+      useCachedInputRate ? retainedTokens : 0,
+      nextOutputTokens,
+      selectedModel.price,
+      useCachedInputRate,
+    );
+  const estimatedNextRequestCost = nextRequestCost(used);
   function addedTokens(
     call: (typeof callTypes)[number],
     assistantOutputTokens?: number,
   ) {
     if (call.kind === "message") {
-      return conversationInputTokens + (assistantOutputTokens ?? 2500);
+      return call.inputTokens + (assistantOutputTokens ?? 2500);
     }
     return call.kind === "mcp" && !hasLoadedMcpSchema(entries, call.id)
       ? call.resultTokens + call.schemaTokens
@@ -628,16 +723,16 @@ export function FlowLabView() {
                 : "message",
           tokens:
             call.kind === "message"
-              ? conversationInputTokens + assistantOutputTokens!
+              ? call.inputTokens + assistantOutputTokens!
               : call.resultTokens,
           originalTokens:
             call.kind === "message"
-              ? conversationInputTokens + assistantOutputTokens!
+              ? call.inputTokens + assistantOutputTokens!
               : call.resultTokens,
           summarized: false,
           toolId: call.kind === "mcp" ? call.id : undefined,
-          inputTokens:
-            call.kind === "message" ? conversationInputTokens : undefined,
+          inputTokens: call.kind === "message" ? call.inputTokens : undefined,
+          imageTokens: call.kind === "message" ? call.imageTokens : undefined,
           outputTokens: assistantOutputTokens,
         };
         return call.kind === "message"
@@ -647,7 +742,7 @@ export function FlowLabView() {
       setPending(null);
       setNotice(
         call.kind === "message"
-          ? `${call.name}: ${formatNumber(conversationInputTokens)} input + ${formatNumber(assistantOutputTokens!)} assistant output tokens retained in this session.`
+          ? `${call.name}: ${call.imageTokens ? `${formatNumber(conversationInputTokens)} text + ${formatNumber(call.imageTokens)} image` : formatNumber(call.inputTokens)} input + ${formatNumber(assistantOutputTokens!)} assistant output tokens retained in this session.`
           : `${call.name}: ${formatNumber(incoming)} tokens added${call.kind === "mcp" && incoming > call.resultTokens ? " for schema + result" : " and retained"} in this session.`,
       );
     }, 700);
@@ -673,6 +768,121 @@ export function FlowLabView() {
           <div className={`meter-percentage ${percent > 85 ? "warning" : ""}`}>
             {percent.toFixed(1)}%<span>occupied</span>
           </div>
+          <div
+            className="flow-pricing-anchor"
+            ref={pricingAnchor}
+            onBlur={(event) => {
+              if (
+                !(event.relatedTarget instanceof Node) ||
+                !event.currentTarget.contains(event.relatedTarget)
+              ) {
+                setShowPricing(false);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setShowPricing(false);
+                event.currentTarget
+                  .querySelector<HTMLButtonElement>(
+                    "[aria-label='Open pricing settings']",
+                  )
+                  ?.focus();
+              }
+            }}
+          >
+            <button
+              type="button"
+              className={`flow-pricing-trigger ${showRequestCost ? "is-on" : ""}`}
+              role="switch"
+              aria-label="Show request cost"
+              aria-checked={showRequestCost}
+              onClick={() => setShowRequestCost((value) => !value)}
+            >
+              <span className="flow-switch-track" aria-hidden="true"><span /></span>
+              Price request
+            </button>
+            {showRequestCost && (
+              <strong
+                className="flow-price-preview"
+                style={{ color: selectedModel.color }}
+              >
+                ${estimatedNextRequestCost.toFixed(4)}
+              </strong>
+            )}
+            <IconButton
+              icon={SlidersHorizontal}
+              className="btn-ghost flow-pricing-settings"
+              aria-label="Open pricing settings"
+              title="Open pricing settings"
+              aria-expanded={showPricing}
+              onClick={() => setShowPricing((value) => !value)}
+            />
+            {showPricing && (
+              <div
+                className="flow-pricing-popover"
+                role="dialog"
+                aria-label="Request cost settings"
+              >
+                <div className="flow-pricing-popover-header">
+                  <div>
+                    <span className="eyebrow">NEXT REQUEST ESTIMATE</span>
+                    <strong>Price the retained context</strong>
+                  </div>
+                  <strong className="flow-price-total" style={{ color: selectedModel.color }}>
+                    ${estimatedNextRequestCost.toFixed(4)}
+                  </strong>
+                </div>
+                <div className="flow-pricing-body">
+                  <label className="flow-model-field">
+                    <span>Model tier</span>
+                    <select
+                      aria-label="Model tier for request cost"
+                      value={selectedModel.id}
+                      onChange={(event) => setModelOptionId(event.target.value)}
+                    >
+                      {modelPriceOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.modelName}{option.name === option.modelName ? "" : ` - ${option.name}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className={`flow-cache-switch ${useCachedInputRate ? "is-on" : ""}`}
+                    role="switch"
+                    aria-checked={useCachedInputRate}
+                    onClick={() => setUseCachedInputRate((value) => !value)}
+                  >
+                    <span className="flow-switch-track" aria-hidden="true"><span /></span>
+                    Use cached-context rate
+                  </button>
+                  <div className="flow-price-breakdown">
+                    <span>{formatNumber(pricedInputTokens)} uncached at ${selectedModel.price.input.toFixed(2)}/1M</span>
+                    <span>{formatNumber(cachedInputTokens)} cached at ${(useCachedInputRate ? selectedModel.price.cachedInput : selectedModel.price.input).toFixed(2)}/1M</span>
+                    <span>{formatNumber(nextOutputTokens)} output at ${selectedModel.price.output.toFixed(2)}/1M</span>
+                  </div>
+                  <p>Estimate for the retained session sent again with a 2.5K-token next response. It is a list-price illustration, not a provider invoice.</p>
+                </div>
+                <div className="flow-pricing-reference">
+                  <IconButton
+                    icon={SlidersHorizontal}
+                    className="btn-ghost btn-small"
+                    onClick={() => setShowRates((value) => !value)}
+                    aria-expanded={showRates}
+                  >
+                    Pricing
+                  </IconButton>
+                  {showRates && (
+                    <div className="flow-pricing-table-wrap">
+                      <PricingTable />
+                      <PricingSources />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <div
           className="retention-meter"
@@ -682,22 +892,22 @@ export function FlowLabView() {
           aria-valuemax={flowCapacity}
           aria-valuenow={used}
         >
-          <span
-            title={`Boot context: ${formatNumber(flowBase)} tokens`}
-            style={{
-              width: `${(flowBase / flowCapacity) * 100}%`,
-              background: "#6e7088",
-            }}
-          />
+          <HoverTooltip
+            className="meter-segment"
+            style={{ width: `${(flowBase / flowCapacity) * 100}%` }}
+            label="Boot context: the model's starting instructions, system tool definitions, deferred MCP catalog, and skill headers available before the first action."
+          >
+            <span style={{ background: "#6e7088" }} />
+          </HoverTooltip>
           {entries.map((entry) => (
-            <span
+            <HoverTooltip
               key={entry.id}
-              title={`${entry.name}: ${formatNumber(entry.tokens)} tokens`}
-              style={{
-                width: `${(entry.tokens / flowCapacity) * 100}%`,
-                background: entryColor(entry),
-              }}
-            />
+              className="meter-segment"
+              style={{ width: `${(entry.tokens / flowCapacity) * 100}%` }}
+              label={flowEntryExplanation(entry)}
+            >
+              <span style={{ background: entryColor(entry) }} />
+            </HoverTooltip>
           ))}
         </div>
         <div className="meter-legend">
@@ -747,6 +957,13 @@ export function FlowLabView() {
                     className={`call-button ${pending === call.id ? "pending" : ""}`}
                     disabled={!!pending || used + incoming > flowCapacity}
                     onClick={() => trigger(call)}
+                    title={
+                      call.kind === "mcp"
+                        ? "MCP tool call: loads its full schema once, then retains each result."
+                        : call.kind === "skill"
+                          ? "Skill invocation: runs a reusable instruction package and retains its output."
+                          : "Conversation turn: retains input and assistant output; older rounds become cached."
+                    }
                   >
                     <span className="call-icon" style={{ color: call.color }}>
                       <call.icon size={20} />
@@ -819,10 +1036,20 @@ export function FlowLabView() {
         <section className="panel flow-timeline-panel">
           <div className="panel-header">
             <SectionLabel icon={Workflow}>The trail you leave</SectionLabel>
-            <span className="badge">
-              {entries.length} RETAINED{" "}
-              {entries.length === 1 ? "ENTRY" : "ENTRIES"}
-            </span>
+            <div className="trail-header-actions">
+              <label className="trail-auto-scroll">
+                <input
+                  type="checkbox"
+                  checked={autoScroll}
+                  onChange={(event) => setAutoScroll(event.target.checked)}
+                />
+                Auto-scroll
+              </label>
+              <span className="badge">
+                {entries.length} RETAINED{" "}
+                {entries.length === 1 ? "ENTRY" : "ENTRIES"}
+              </span>
+            </div>
           </div>
           <div className={`flow-route ${pending ? "running" : ""}`}>
             <div>
@@ -840,31 +1067,55 @@ export function FlowLabView() {
               <span>Stays in context</span>
             </div>
           </div>
-          <div className="flow-timeline">
-            <div className="timeline-entry baseline-entry">
+          <div className="flow-timeline" ref={timelineRef}>
+            <HoverTooltip
+              as="div"
+              className="timeline-entry baseline-entry"
+              label="Session boot context: content loaded before your first action. It provides the model's instructions, available system tools, deferred MCP catalog, and skill headers."
+            >
               <span className="timeline-dot" />
               <div>
                 <strong>Session boot context</strong>
                 <p>Claude Code observation plus explicit simulator estimates</p>
               </div>
               <span className="mono">{compact(flowBase)}</span>
-            </div>
+            </HoverTooltip>
             <div className="flow-boot-list">
               {flowBootEntries.map((entry) => (
-                <div
+                <HoverTooltip
+                  as="div"
                   key={entry.id}
                   className={`flow-boot-entry boot-${entry.kind}`}
+                  label={
+                    entry.kind === "mcp-catalog"
+                      ? "Deferred MCP catalog: lightweight metadata that advertises connected MCP tools before their full schemas are loaded."
+                      : entry.kind === "skill-header"
+                        ? "Skill header: reusable instruction metadata made available at session boot."
+                        : entry.kind === "system"
+                          ? "System tool headers: host-provided tool descriptions and parameter schemas available to the model."
+                          : "Observed system prompt: host and model guidance that establishes behavior before the first message."
+                  }
                 >
                   <span>{entry.name}</span>
                   <small>{entry.detail}</small>
                   <strong>{compact(entry.tokens)}</strong>
-                </div>
+                </HoverTooltip>
               ))}
             </div>
-            {entries.map((entry, index) => (
-              <div
+            {entries.map((entry, index) => {
+              const retainedBefore =
+                flowBase +
+                entries
+                  .slice(0, index)
+                  .reduce((total, previous) => total + previous.tokens, 0);
+              const totalCost = nextRequestCost(retainedBefore + entry.tokens);
+              const addedCost = totalCost - nextRequestCost(retainedBefore);
+              return (
+                <HoverTooltip
+                as="div"
                 className={`timeline-entry ${entry.cached ? "cached-entry" : ""}`}
                 key={entry.id}
+                label={flowEntryExplanation(entry)}
               >
                 <span
                   className={`timeline-dot dot-${entry.kind}`}
@@ -886,6 +1137,8 @@ export function FlowLabView() {
                           ? "Tool result retained after execution"
                           : entry.kind === "skill-result"
                             ? "Skill result retained; header was already present at boot"
+                            : entry.imageTokens
+                              ? `${formatNumber(entry.inputTokens! - entry.imageTokens)} text + ${formatNumber(entry.imageTokens)} image visual tokens + ${formatNumber(entry.outputTokens ?? 0)} assistant output ${entry.cached ? "cached by the host" : "retained"}`
                             : entry.cached
                               ? `${formatNumber(entry.inputTokens ?? conversationInputTokens)} input + ${formatNumber(entry.outputTokens ?? 0)} assistant output cached by the host`
                               : `${formatNumber(entry.inputTokens ?? conversationInputTokens)} input + ${formatNumber(entry.outputTokens ?? 0)} assistant output retained`}
@@ -912,9 +1165,12 @@ export function FlowLabView() {
                   {entry.summarized && (
                     <small>was {formatNumber(entry.originalTokens)}</small>
                   )}
+                  <small className="entry-cost">+${addedCost.toFixed(4)} next request</small>
+                  <small className="entry-cost-total">${totalCost.toFixed(4)} total</small>
                 </span>
-              </div>
-            ))}
+              </HoverTooltip>
+              );
+            })}
             {pending && (
               <div className="pending-entry">
                 <span className="live-dot" />

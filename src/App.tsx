@@ -48,6 +48,7 @@ import {
   Zap,
 } from "lucide-react";
 import { ContextLabView, FlowLabView } from "./ContextFlowLabs";
+import { PricingSources, PricingTable } from "./PricingReference";
 import PromptLab from "./PromptLab";
 import {
   characterCount,
@@ -334,6 +335,9 @@ function Tokenizer() {
     (v): v is string => typeof v === "string" && v.length <= 100000,
   );
   const [metric, setMetric] = useState<"tokens" | "cost">("tokens");
+  const [costDirection, setCostDirection] = useState<"input" | "output">(
+    "input",
+  );
   const [costMultiplier, setCostMultiplier] = useState<1 | 1000>(1);
   const [showRates, setShowRates] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -351,10 +355,22 @@ function Tokenizer() {
       ),
     [counts],
   );
+  const outputCosts = useMemo(
+    () =>
+      models.map((model, index) =>
+        model.pricing.map(
+          (price) => (counts[index] * price.output) / 1000000,
+        ),
+      ),
+    [counts],
+  );
+  const selectedCosts = costDirection === "input" ? costs : outputCosts;
   const values =
     metric === "tokens"
       ? counts
-      : costs.map((modelCosts) => Math.max(...modelCosts) * costMultiplier);
+      : selectedCosts.map(
+          (modelCosts) => Math.max(...modelCosts) * costMultiplier,
+        );
   const peak = Math.max(...values, 0);
   const magnitude = peak > 0 ? 10 ** Math.floor(Math.log10(peak)) : 1;
   const max =
@@ -507,31 +523,58 @@ function Tokenizer() {
               >
                 Cost
               </IconButton>
-              {metric === "cost" && (
-                <IconButton
-                  icon={Layers3}
-                  className={costMultiplier === 1000 ? "active" : ""}
-                  onClick={() =>
-                    setCostMultiplier((value) => (value === 1 ? 1000 : 1))
-                  }
-                  aria-pressed={costMultiplier === 1000}
-                >
-                  x1000
-                </IconButton>
-              )}
             </div>
           </div>
+          {metric === "cost" && (
+            <div className="chart-cost-controls">
+              <span>Price this text as</span>
+              <div
+                className="segmented"
+                role="group"
+                aria-label="Cost token direction"
+              >
+                <IconButton
+                  icon={ArrowRight}
+                  className={costDirection === "input" ? "active" : ""}
+                  onClick={() => setCostDirection("input")}
+                  aria-pressed={costDirection === "input"}
+                >
+                  Input
+                </IconButton>
+                <IconButton
+                  icon={ArrowUpRight}
+                  className={costDirection === "output" ? "active" : ""}
+                  onClick={() => setCostDirection("output")}
+                  aria-pressed={costDirection === "output"}
+                >
+                  Output
+                </IconButton>
+              </div>
+              <IconButton
+                icon={Layers3}
+                className={`btn-ghost btn-small ${costMultiplier === 1000 ? "active" : ""}`}
+                onClick={() =>
+                  setCostMultiplier((value) => (value === 1 ? 1000 : 1))
+                }
+                aria-pressed={costMultiplier === 1000}
+              >
+                x1000
+              </IconButton>
+            </div>
+          )}
           <div className="chart-description">
             <span>
               {metric === "tokens"
                 ? "One input. Different token footprints."
-                : `Standard short-context input cost for ${costMultiplier.toLocaleString()} input${costMultiplier === 1 ? "" : "s"}.`}
+                : `Standard short-context ${costDirection} cost for ${costMultiplier.toLocaleString()} equivalent ${costDirection}${costMultiplier === 1 ? "" : "s"}.`}
             </span>
             <span className="badge badge-purple">LOCAL TOKENIZERS</span>
           </div>
           <div className="model-chart">
             {models.map((m, i) => {
-              const modelCosts = costs[i].map((cost) => cost * costMultiplier);
+              const modelCosts = selectedCosts[i].map(
+                (cost) => cost * costMultiplier,
+              );
               const lowCost = Math.min(...modelCosts);
               const highCost = Math.max(...modelCosts);
               return (
@@ -623,44 +666,12 @@ function Tokenizer() {
           </SectionLabel>
           <p>
             Cost mode uses each model's standard short-context input price. The
-            grouped GPT row shows Sol, Terra, and Luna separately in that
-            order. Cached input and output prices are listed for reference and
-            are not included in the chart calculation.
+            GPT-5.6 Sol, Terra, and Luna rows are separate model tiers. Cached
+            input and output prices are listed for reference and are not
+            included in the chart calculation.
           </p>
-          <div
-            className="pricing-table"
-            role="table"
-            aria-label="Standard API model pricing"
-          >
-            <div className="pricing-table-head" role="row">
-              <span>Model</span>
-              <span>Input</span>
-              <span>Cached</span>
-              <span>Output</span>
-            </div>
-            {models.flatMap((model) =>
-              model.pricing.map((price) => (
-                <div
-                  className="pricing-table-row"
-                  role="row"
-                  key={`${model.id}-${price.label}`}
-                >
-                  <span>
-                    <strong>{model.name}</strong>
-                    {model.pricing.length > 1 && <small>{price.label}</small>}
-                  </span>
-                  <span>${price.input.toFixed(2)}</span>
-                  <span>${price.cachedInput.toFixed(2)}</span>
-                  <span>${price.output.toFixed(2)}</span>
-                </div>
-              )),
-            )}
-          </div>
-          <p className="pricing-sources">
-            Sources: Anthropic API pricing, OpenAI API pricing, and xAI model
-            pricing, retrieved 2026-09-13. Grok 4.6 uses the under-200K-context
-            tier; pricing can change.
-          </p>
+          <PricingTable />
+          <PricingSources />
         </section>
       )}
       <section className="panel token-view">

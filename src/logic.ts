@@ -12,12 +12,23 @@ export const models = [
   { id: 'fable-5-1', name: 'Fable 5.1', family: 'Claude', color: '#b19aff', tokenizer: 'ctoc', countAdjustment: 1, pricing: [{ label: 'Standard', input: 10, cachedInput: 0.25, output: 50 }], note: 'ctoc proxy · newer-era calibration unavailable' },
   { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', family: 'Claude', color: '#f3ba94', tokenizer: 'ctoc', countAdjustment: 1, pricing: [{ label: 'Standard', input: 2, cachedInput: 0.2, output: 10 }], note: 'ctoc proxy · newer-era calibration unavailable' },
   { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', family: 'Claude', color: '#eccba7', tokenizer: 'ctoc', countAdjustment: 0.7, pricing: [{ label: 'Standard', input: 1, cachedInput: 0.1, output: 5 }], note: 'ctoc base · illustrative 30% lower-token calibration' },
+  { id: 'gpt-6-astra', name: 'GPT-6 Astra', family: 'OpenAI', color: '#74c5ff', tokenizer: 'o200k_base', countAdjustment: 1, pricing: [{ label: 'Standard', input: 10, cachedInput: 1, output: 50 }], note: 'js-tiktoken · o200k_base proxy · approximate' },
   { id: 'gpt-5-6-family', name: 'GPT 5.6 (Sol / Terra / Luna)', family: 'OpenAI', color: '#90d9c1', tokenizer: 'o200k_base', countAdjustment: 1, pricing: [{ label: 'Sol', input: 4, cachedInput: 0.4, output: 20 }, { label: 'Terra', input: 2, cachedInput: 0.2, output: 12 }, { label: 'Luna', input: 0.2, cachedInput: 0.02, output: 1.2 }], note: 'js-tiktoken · o200k_base · plain-text count' },
   { id: 'grok-4.6', name: 'Grok 4.6', family: 'Grok', color: '#8baffb', tokenizer: 'o200k_base', countAdjustment: 1, pricing: [{ label: 'Under 200K context', input: 2, cachedInput: 0.5, output: 6 }], note: 'js-tiktoken · o200k_base proxy · approximate' },
   // Disabled for now: only Claude, OpenAI, and Grok are shown.
   // { id: 'deepseek-flash-4.1', name: 'DeepSeek Flash 4.1', family: 'DeepSeek', color: '#8baffb', rate: 0.14 },
 ] as const;
 export type Model = typeof models[number];
+export const modelPriceOptions = models.flatMap((model) =>
+  model.pricing.map((price) => ({
+    id: `${model.id}-${price.label}`,
+    name: model.pricing.length === 1 ? model.name : price.label,
+    modelName: model.name,
+    color: model.color,
+    price,
+  })),
+);
+export type ModelPriceOption = (typeof modelPriceOptions)[number];
 export const countModelTokens = (text: string, model: Model): number => Math.ceil(countTokens(text, model.tokenizer) * model.countAdjustment);
 export function compareModelTokens(text: string): number[] {
   // Shared backends are evaluated once per input, not once per model row.
@@ -28,6 +39,19 @@ export function compareModelTokens(text: string): number[] {
   });
 }
 export const inputCost = (tokens: number, price: ModelPrice): number => tokens * price.input / 1000000;
+export function requestCost(
+  inputTokens: number,
+  cachedInputTokens: number,
+  outputTokens: number,
+  price: ModelPrice,
+  useCachedInputRate: boolean,
+): number {
+  const cachedRate = useCachedInputRate ? price.cachedInput : price.input;
+  return (
+    (inputTokens * price.input + cachedInputTokens * cachedRate + outputTokens * price.output) /
+    1000000
+  );
+}
 export const samples = {
   prose: 'You are a thoughtful AI assistant. Explain how large language models turn text into tokens, and why every token matters.\n\nUse a simple analogy, keep your answer concise, and include one practical example. Make it something a curious beginner would understand.',
   code: 'async function summarize(document: string) {\n  const sentences = document.split(".");\n  return {\n    summary: sentences.slice(0, 3).join("."),\n    wordCount: document.trim().split(/\\s+/).length,\n  };\n}',
@@ -83,8 +107,10 @@ export const flowBootEntries: FlowBootEntry[] = [
 export const flowCapacity = 64000;
 export const flowBase = flowBootEntries.reduce((total, entry) => total + entry.tokens, 0);
 export type FlowEntryKind = 'mcp-schema' | 'mcp-result' | 'skill-result' | 'message';
-export type FlowEntry = { id: number; kind: FlowEntryKind; name: string; tokens: number; originalTokens: number; summarized: boolean; toolId?: string; round?: number; cached?: boolean; inputTokens?: number; outputTokens?: number };
+export type FlowEntry = { id: number; kind: FlowEntryKind; name: string; tokens: number; originalTokens: number; summarized: boolean; toolId?: string; round?: number; cached?: boolean; inputTokens?: number; imageTokens?: number; outputTokens?: number };
 export const conversationInputTokens = 600;
+export const conversationImageTokens = 1560;
+export const conversationImageInputTokens = conversationInputTokens + conversationImageTokens;
 export function conversationOutputTokens(random = Math.random): number {
   return 2000 + Math.floor(Math.max(0, Math.min(0.999999, random())) * 1001);
 }
@@ -105,5 +131,16 @@ export function retainConversation(entries: FlowEntry[], entry: FlowEntry): Flow
   return retainCall(next, { ...entry, kind: 'message', round, cached: false });
 }
 export function compactEntries(entries: FlowEntry[]): FlowEntry[] {
-  return entries.map(e => e.summarized ? e : { ...e, tokens: Math.ceil(e.tokens * 0.25), summarized: true });
+  if (!entries.length || (entries.length === 1 && entries[0].summarized)) {
+    return entries;
+  }
+  const originalTokens = entries.reduce((total, entry) => total + entry.originalTokens, 0);
+  return [{
+    id: Date.now(),
+    kind: 'skill-result',
+    name: 'Session summary',
+    tokens: Math.ceil(entries.reduce((total, entry) => total + entry.tokens, 0) * 0.25),
+    originalTokens,
+    summarized: true,
+  }];
 }
