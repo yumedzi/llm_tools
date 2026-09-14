@@ -107,10 +107,11 @@ export const flowBootEntries: FlowBootEntry[] = [
 export const flowCapacity = 64000;
 export const flowBase = flowBootEntries.reduce((total, entry) => total + entry.tokens, 0);
 export type FlowEntryKind = 'mcp-schema' | 'mcp-result' | 'skill-result' | 'message';
-export type FlowEntry = { id: number; kind: FlowEntryKind; name: string; tokens: number; originalTokens: number; summarized: boolean; toolId?: string; round?: number; cached?: boolean; inputTokens?: number; imageTokens?: number; outputTokens?: number };
+export type FlowEntry = { id: number; kind: FlowEntryKind; name: string; tokens: number; originalTokens: number; summarized: boolean; toolId?: string; round?: number; cached?: boolean; inputTokens?: number; imageTokens?: number; outputTokens?: number; reasoningTokens?: number };
 export const conversationInputTokens = 600;
 export const conversationImageTokens = 1560;
 export const conversationImageInputTokens = conversationInputTokens + conversationImageTokens;
+export const conversationReasoningTokens = 1200;
 export function conversationOutputTokens(random = Math.random): number {
   return 2000 + Math.floor(Math.max(0, Math.min(0.999999, random())) * 1001);
 }

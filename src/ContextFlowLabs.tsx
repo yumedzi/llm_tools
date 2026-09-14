@@ -40,6 +40,7 @@ import {
   conversationImageTokens,
   conversationInputTokens,
   conversationOutputTokens,
+  conversationReasoningTokens,
   fitAllocations,
   flowBase,
   flowBootEntries,
@@ -550,6 +551,10 @@ const validEntries = (value: unknown): value is FlowEntry[] =>
       (entry as FlowEntry).tokens > 0 &&
       Number.isFinite((entry as FlowEntry).originalTokens) &&
       (entry as FlowEntry).originalTokens >= (entry as FlowEntry).tokens &&
+      ((entry as FlowEntry).reasoningTokens === undefined ||
+        (Number.isFinite((entry as FlowEntry).reasoningTokens) &&
+          (entry as FlowEntry).reasoningTokens! >= 0 &&
+          (entry as FlowEntry).reasoningTokens! <= (entry as FlowEntry).tokens)) &&
       typeof (entry as FlowEntry).summarized === "boolean",
   ) &&
   flowUsed(value as FlowEntry[]) <= flowCapacity;
@@ -577,6 +582,9 @@ function flowEntryExplanation(entry: FlowEntry) {
   if (entry.kind === "skill-result") {
     return "Skill result: output from a reusable instruction package. Its skill header was already available at session boot.";
   }
+  if (entry.reasoningTokens) {
+    return "Conversation message with reasoning: the model generated internal reasoning in addition to its visible final answer. Both are output tokens, billed at the output rate, and retained when the host keeps the turn in context.";
+  }
   return entry.cached
     ? "Cached message: an older conversation round retained by the host. It still uses context space, but can qualify for a cached-input price." 
     : entry.imageTokens
@@ -601,6 +609,11 @@ export function FlowLabView() {
   const [autoScroll, setAutoScroll] = usePersistentState(
     "context-lab:flow-auto-scroll:v1",
     true,
+    (value): value is boolean => typeof value === "boolean",
+  );
+  const [simulateReasoning, setSimulateReasoning] = usePersistentState(
+    "context-lab:flow-reasoning:v1",
+    false,
     (value): value is boolean => typeof value === "boolean",
   );
   const [modelOptionId, setModelOptionId] = usePersistentState<string>(
@@ -652,7 +665,11 @@ export function FlowLabView() {
     .reduce((total, entry) => total + entry.tokens, 0);
   const cachedMessages = entries
     .filter((entry) => entry.kind === "message" && entry.cached)
-    .reduce((total, entry) => total + entry.tokens, 0);
+    .reduce((total, entry) => total + entry.tokens - (entry.reasoningTokens ?? 0), 0);
+  const reasoning = entries.reduce(
+    (total, entry) => total + (entry.reasoningTokens ?? 0),
+    0,
+  );
   const selectedModel =
     modelPriceOptions.find((option) => option.id === modelOptionId) ??
     modelPriceOptions[0];
@@ -673,7 +690,8 @@ export function FlowLabView() {
     assistantOutputTokens?: number,
   ) {
     if (call.kind === "message") {
-      return call.inputTokens + (assistantOutputTokens ?? 2500);
+      return call.inputTokens + (assistantOutputTokens ?? 2500) +
+        (simulateReasoning ? conversationReasoningTokens : 0);
     }
     return call.kind === "mcp" && !hasLoadedMcpSchema(entries, call.id)
       ? call.resultTokens + call.schemaTokens
@@ -683,6 +701,10 @@ export function FlowLabView() {
     if (pending) return;
     const assistantOutputTokens =
       call.kind === "message" ? conversationOutputTokens() : undefined;
+    const reasoningTokens =
+      call.kind === "message" && simulateReasoning
+        ? conversationReasoningTokens
+        : 0;
     const incoming = addedTokens(call, assistantOutputTokens);
     if (used + incoming > flowCapacity) {
       setNotice(
@@ -723,17 +745,18 @@ export function FlowLabView() {
                 : "message",
           tokens:
             call.kind === "message"
-              ? call.inputTokens + assistantOutputTokens!
+              ? call.inputTokens + assistantOutputTokens! + reasoningTokens
               : call.resultTokens,
           originalTokens:
             call.kind === "message"
-              ? call.inputTokens + assistantOutputTokens!
+              ? call.inputTokens + assistantOutputTokens! + reasoningTokens
               : call.resultTokens,
           summarized: false,
           toolId: call.kind === "mcp" ? call.id : undefined,
           inputTokens: call.kind === "message" ? call.inputTokens : undefined,
           imageTokens: call.kind === "message" ? call.imageTokens : undefined,
           outputTokens: assistantOutputTokens,
+          reasoningTokens: reasoningTokens || undefined,
         };
         return call.kind === "message"
           ? (retainConversation(next, result) ?? next)
@@ -742,7 +765,7 @@ export function FlowLabView() {
       setPending(null);
       setNotice(
         call.kind === "message"
-          ? `${call.name}: ${call.imageTokens ? `${formatNumber(conversationInputTokens)} text + ${formatNumber(call.imageTokens)} image` : formatNumber(call.inputTokens)} input + ${formatNumber(assistantOutputTokens!)} assistant output tokens retained in this session.`
+          ? `${call.name}: ${call.imageTokens ? `${formatNumber(conversationInputTokens)} text + ${formatNumber(call.imageTokens)} image` : formatNumber(call.inputTokens)} input + ${formatNumber(assistantOutputTokens!)} assistant output${reasoningTokens ? ` + ${formatNumber(reasoningTokens)} reasoning output` : ""} tokens retained in this session.`
           : `${call.name}: ${formatNumber(incoming)} tokens added${call.kind === "mcp" && incoming > call.resultTokens ? " for schema + result" : " and retained"} in this session.`,
       );
     }, 700);
@@ -899,16 +922,32 @@ export function FlowLabView() {
           >
             <span style={{ background: "#6e7088" }} />
           </HoverTooltip>
-          {entries.map((entry) => (
-            <HoverTooltip
-              key={entry.id}
-              className="meter-segment"
-              style={{ width: `${(entry.tokens / flowCapacity) * 100}%` }}
-              label={flowEntryExplanation(entry)}
-            >
-              <span style={{ background: entryColor(entry) }} />
-            </HoverTooltip>
-          ))}
+          {entries.flatMap((entry) => {
+            const reasoningTokens = entry.reasoningTokens ?? 0;
+            const visibleTokens = entry.tokens - reasoningTokens;
+            return [
+              <HoverTooltip
+                key={`${entry.id}-visible`}
+                className="meter-segment"
+                style={{ width: `${(visibleTokens / flowCapacity) * 100}%` }}
+                label={flowEntryExplanation(entry)}
+              >
+                <span style={{ background: entryColor(entry) }} />
+              </HoverTooltip>,
+              ...(reasoningTokens
+                ? [
+                    <HoverTooltip
+                      key={`${entry.id}-reasoning`}
+                      className="meter-segment reasoning-meter-segment"
+                      style={{ width: `${(reasoningTokens / flowCapacity) * 100}%` }}
+                      label={`Reasoning output: ${formatNumber(reasoningTokens)} internal tokens generated before the visible answer. They are output-priced and retained as part of this conversation turn.`}
+                    >
+                      <span />
+                    </HoverTooltip>,
+                  ]
+                : []),
+            ];
+          })}
         </div>
         <div className="meter-legend">
           <span>
@@ -927,6 +966,12 @@ export function FlowLabView() {
             <i style={{ background: "#63748f" }} />
             Cached messages {compact(cachedMessages)}
           </span>
+          {reasoning > 0 && (
+            <span>
+              <i className="reasoning-legend" />
+              Reasoning output {compact(reasoning)}
+            </span>
+          )}
           <strong>{formatNumber(flowCapacity - used)} free</strong>
         </div>
       </section>
@@ -944,12 +989,25 @@ export function FlowLabView() {
               return (
                 <div key={call.id}>
                   {(index === 0 || index === 2 || index === 4) && (
-                    <div className="call-group-label">
+                    <div className={`call-group-label ${index === 4 ? "conversation-label" : ""}`}>
                       {index === 0
                         ? "MCP TOOL CALLS"
                         : index === 2
                           ? "SKILL INVOCATIONS"
                           : "CONVERSATION"}
+                      {index === 4 && (
+                        <button
+                          type="button"
+                          className={`flow-cache-switch reasoning-switch ${simulateReasoning ? "is-on" : ""}`}
+                          role="switch"
+                          aria-checked={simulateReasoning}
+                          title="Add 1,200 internal reasoning tokens to each new conversation response"
+                          onClick={() => setSimulateReasoning((value) => !value)}
+                        >
+                          <span className="flow-switch-track" aria-hidden="true"><span /></span>
+                          Reasoning
+                        </button>
+                      )}
                     </div>
                   )}
                   <button
@@ -1110,6 +1168,9 @@ export function FlowLabView() {
                   .reduce((total, previous) => total + previous.tokens, 0);
               const totalCost = nextRequestCost(retainedBefore + entry.tokens);
               const addedCost = totalCost - nextRequestCost(retainedBefore);
+              const reasoningCost = entry.reasoningTokens
+                ? requestCost(0, 0, entry.reasoningTokens, selectedModel.price, false)
+                : 0;
               return (
                 <HoverTooltip
                 as="div"
@@ -1138,10 +1199,10 @@ export function FlowLabView() {
                           : entry.kind === "skill-result"
                             ? "Skill result retained; header was already present at boot"
                             : entry.imageTokens
-                              ? `${formatNumber(entry.inputTokens! - entry.imageTokens)} text + ${formatNumber(entry.imageTokens)} image visual tokens + ${formatNumber(entry.outputTokens ?? 0)} assistant output ${entry.cached ? "cached by the host" : "retained"}`
+                              ? `${formatNumber(entry.inputTokens! - entry.imageTokens)} text + ${formatNumber(entry.imageTokens)} image visual tokens + ${formatNumber(entry.outputTokens ?? 0)} assistant output${entry.reasoningTokens ? ` + ${formatNumber(entry.reasoningTokens)} reasoning` : ""} ${entry.cached ? "cached by the host" : "retained"}`
                             : entry.cached
-                              ? `${formatNumber(entry.inputTokens ?? conversationInputTokens)} input + ${formatNumber(entry.outputTokens ?? 0)} assistant output cached by the host`
-                              : `${formatNumber(entry.inputTokens ?? conversationInputTokens)} input + ${formatNumber(entry.outputTokens ?? 0)} assistant output retained`}
+                              ? `${formatNumber(entry.inputTokens ?? conversationInputTokens)} input + ${formatNumber(entry.outputTokens ?? 0)} assistant output${entry.reasoningTokens ? ` + ${formatNumber(entry.reasoningTokens)} reasoning` : ""} cached by the host`
+                              : `${formatNumber(entry.inputTokens ?? conversationInputTokens)} input + ${formatNumber(entry.outputTokens ?? 0)} assistant output${entry.reasoningTokens ? ` + ${formatNumber(entry.reasoningTokens)} reasoning` : ""} retained`}
                   </p>
                   <span
                     className={`retained-tag ${entry.summarized ? "is-compacted" : entry.cached ? "is-cached" : ""}`}
@@ -1166,6 +1227,9 @@ export function FlowLabView() {
                     <small>was {formatNumber(entry.originalTokens)}</small>
                   )}
                   <small className="entry-cost">+${addedCost.toFixed(4)} next request</small>
+                  {reasoningCost > 0 && (
+                    <small className="entry-reasoning-cost">+${reasoningCost.toFixed(4)} reasoning output</small>
+                  )}
                   <small className="entry-cost-total">${totalCost.toFixed(4)} total</small>
                 </span>
               </HoverTooltip>
