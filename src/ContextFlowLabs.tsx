@@ -40,6 +40,7 @@ import {
   conversationImageTokens,
   conversationInputTokens,
   conversationOutputTokens,
+  conversationReasoningMaxTokens,
   conversationReasoningTokens,
   fitAllocations,
   flowBase,
@@ -517,7 +518,7 @@ const callTypes = [
     id: "message",
     kind: "message" as const,
     name: "Continue conversation",
-    detail: "600 input + 2-3K assistant output",
+    detail: "600 input + 2-3K output + 0.8-1.6K thinking",
     resultTokens: 0,
     inputTokens: conversationInputTokens,
     icon: MessageSquare,
@@ -527,7 +528,7 @@ const callTypes = [
     id: "image",
     kind: "message" as const,
     name: "Attach image",
-    detail: "600 text + 1.56K image + 2-3K assistant output",
+    detail: "600 text + 1.56K image + 2-3K output + 0.8-1.6K thinking",
     resultTokens: 0,
     inputTokens: conversationImageInputTokens,
     imageTokens: conversationImageTokens,
@@ -663,9 +664,12 @@ export function FlowLabView() {
   const skills = entries
     .filter((entry) => entry.kind === "skill-result")
     .reduce((total, entry) => total + entry.tokens, 0);
-  const cachedMessages = entries
-    .filter((entry) => entry.kind === "message" && entry.cached)
-    .reduce((total, entry) => total + entry.tokens - (entry.reasoningTokens ?? 0), 0);
+  const messageInput = entries
+    .filter((entry) => entry.kind === "message")
+    .reduce((total, entry) => total + (entry.inputTokens ?? 0), 0);
+  const messageOutput = entries
+    .filter((entry) => entry.kind === "message")
+    .reduce((total, entry) => total + (entry.outputTokens ?? 0), 0);
   const reasoning = entries.reduce(
     (total, entry) => total + (entry.reasoningTokens ?? 0),
     0,
@@ -691,7 +695,7 @@ export function FlowLabView() {
   ) {
     if (call.kind === "message") {
       return call.inputTokens + (assistantOutputTokens ?? 2500) +
-        (simulateReasoning ? conversationReasoningTokens : 0);
+        (simulateReasoning ? conversationReasoningMaxTokens : 0);
     }
     return call.kind === "mcp" && !hasLoadedMcpSchema(entries, call.id)
       ? call.resultTokens + call.schemaTokens
@@ -703,7 +707,7 @@ export function FlowLabView() {
       call.kind === "message" ? conversationOutputTokens() : undefined;
     const reasoningTokens =
       call.kind === "message" && simulateReasoning
-        ? conversationReasoningTokens
+        ? conversationReasoningTokens()
         : 0;
     const incoming = addedTokens(call, assistantOutputTokens);
     if (used + incoming > flowCapacity) {
@@ -924,28 +928,47 @@ export function FlowLabView() {
           </HoverTooltip>
           {entries.flatMap((entry) => {
             const reasoningTokens = entry.reasoningTokens ?? 0;
-            const visibleTokens = entry.tokens - reasoningTokens;
+            if (entry.kind === "message") {
+              return [
+                <HoverTooltip
+                  key={`${entry.id}-input`}
+                  className="meter-segment input-meter-segment"
+                  style={{ width: `${((entry.inputTokens ?? 0) / flowCapacity) * 100}%` }}
+                  label={`Input: ${formatNumber(entry.inputTokens ?? 0)} tokens supplied to this turn${entry.imageTokens ? `, including ${formatNumber(entry.imageTokens)} image visual tokens` : ""}.`}
+                >
+                  <span />
+                </HoverTooltip>,
+                ...(reasoningTokens
+                  ? [
+                      <HoverTooltip
+                        key={`${entry.id}-reasoning`}
+                        className="meter-segment reasoning-meter-segment"
+                        style={{ width: `${(reasoningTokens / flowCapacity) * 100}%` }}
+                        label={`Thinking: ${formatNumber(reasoningTokens)} internal tokens generated before the visible answer. They are output-priced and retained as part of this conversation turn.`}
+                      >
+                        <span />
+                      </HoverTooltip>,
+                    ]
+                  : []),
+                <HoverTooltip
+                  key={`${entry.id}-output`}
+                  className="meter-segment output-meter-segment"
+                  style={{ width: `${((entry.outputTokens ?? 0) / flowCapacity) * 100}%` }}
+                  label={`Output: ${formatNumber(entry.outputTokens ?? 0)} visible assistant-response tokens retained for later turns.`}
+                >
+                  <span />
+                </HoverTooltip>,
+              ];
+            }
             return [
               <HoverTooltip
-                key={`${entry.id}-visible`}
+                key={entry.id}
                 className="meter-segment"
-                style={{ width: `${(visibleTokens / flowCapacity) * 100}%` }}
+                style={{ width: `${(entry.tokens / flowCapacity) * 100}%` }}
                 label={flowEntryExplanation(entry)}
               >
                 <span style={{ background: entryColor(entry) }} />
               </HoverTooltip>,
-              ...(reasoningTokens
-                ? [
-                    <HoverTooltip
-                      key={`${entry.id}-reasoning`}
-                      className="meter-segment reasoning-meter-segment"
-                      style={{ width: `${(reasoningTokens / flowCapacity) * 100}%` }}
-                      label={`Reasoning output: ${formatNumber(reasoningTokens)} internal tokens generated before the visible answer. They are output-priced and retained as part of this conversation turn.`}
-                    >
-                      <span />
-                    </HoverTooltip>,
-                  ]
-                : []),
             ];
           })}
         </div>
@@ -963,13 +986,22 @@ export function FlowLabView() {
             Skill results {compact(skills)}
           </span>
           <span>
-            <i style={{ background: "#63748f" }} />
-            Cached messages {compact(cachedMessages)}
+            <i className="input-legend" />
+            Input {compact(messageInput)}
           </span>
           {reasoning > 0 && (
             <span>
               <i className="reasoning-legend" />
-              Reasoning output {compact(reasoning)}
+              Thinking {compact(reasoning)}
+            </span>
+          )}
+          <span>
+            <i className="output-legend" />
+            Output {compact(messageOutput)}
+          </span>
+          {entries.some((entry) => entry.kind === "message" && entry.cached) && (
+            <span className="cached-message-note">
+              Cached turns use the cached-input rate
             </span>
           )}
           <strong>{formatNumber(flowCapacity - used)} free</strong>
@@ -1001,7 +1033,7 @@ export function FlowLabView() {
                           className={`flow-cache-switch reasoning-switch ${simulateReasoning ? "is-on" : ""}`}
                           role="switch"
                           aria-checked={simulateReasoning}
-                          title="Add 1,200 internal reasoning tokens to each new conversation response"
+                          title="Add a random 800-1,600 internal thinking tokens to each new conversation response"
                           onClick={() => setSimulateReasoning((value) => !value)}
                         >
                           <span className="flow-switch-track" aria-hidden="true"><span /></span>
@@ -1189,7 +1221,26 @@ export function FlowLabView() {
                       <span className="entry-number">round {entry.round}</span>
                     )}
                   </strong>
-                  <p>
+                  {entry.kind === "message" && !entry.summarized ? (
+                    <div className="message-token-breakdown">
+                      <span className="message-input">
+                        <small>INPUT</small>
+                        <strong>{formatNumber(entry.inputTokens ?? 0)}</strong>
+                        {entry.imageTokens && <em>{formatNumber(entry.imageTokens)} image</em>}
+                      </span>
+                      <span className="message-thinking">
+                        <small>THINKING</small>
+                        <strong>{formatNumber(entry.reasoningTokens ?? 0)}</strong>
+                        <em>output-priced</em>
+                      </span>
+                      <span className="message-output">
+                        <small>OUTPUT</small>
+                        <strong>{formatNumber(entry.outputTokens ?? 0)}</strong>
+                        <em>visible answer</em>
+                      </span>
+                    </div>
+                  ) : (
+                    <p>
                     {entry.summarized
                       ? "Compacted summary - details removed"
                       : entry.kind === "mcp-schema"
@@ -1198,12 +1249,9 @@ export function FlowLabView() {
                           ? "Tool result retained after execution"
                           : entry.kind === "skill-result"
                             ? "Skill result retained; header was already present at boot"
-                            : entry.imageTokens
-                              ? `${formatNumber(entry.inputTokens! - entry.imageTokens)} text + ${formatNumber(entry.imageTokens)} image visual tokens + ${formatNumber(entry.outputTokens ?? 0)} assistant output${entry.reasoningTokens ? ` + ${formatNumber(entry.reasoningTokens)} reasoning` : ""} ${entry.cached ? "cached by the host" : "retained"}`
-                            : entry.cached
-                              ? `${formatNumber(entry.inputTokens ?? conversationInputTokens)} input + ${formatNumber(entry.outputTokens ?? 0)} assistant output${entry.reasoningTokens ? ` + ${formatNumber(entry.reasoningTokens)} reasoning` : ""} cached by the host`
-                              : `${formatNumber(entry.inputTokens ?? conversationInputTokens)} input + ${formatNumber(entry.outputTokens ?? 0)} assistant output${entry.reasoningTokens ? ` + ${formatNumber(entry.reasoningTokens)} reasoning` : ""} retained`}
-                  </p>
+                            : "Retained context"}
+                    </p>
+                  )}
                   <span
                     className={`retained-tag ${entry.summarized ? "is-compacted" : entry.cached ? "is-cached" : ""}`}
                   >

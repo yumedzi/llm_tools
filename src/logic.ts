@@ -111,7 +111,14 @@ export type FlowEntry = { id: number; kind: FlowEntryKind; name: string; tokens:
 export const conversationInputTokens = 600;
 export const conversationImageTokens = 1560;
 export const conversationImageInputTokens = conversationInputTokens + conversationImageTokens;
-export const conversationReasoningTokens = 1200;
+export const conversationReasoningMinTokens = 800;
+export const conversationReasoningMaxTokens = 1600;
+export function conversationReasoningTokens(random = Math.random): number {
+  return conversationReasoningMinTokens + Math.floor(
+    Math.max(0, Math.min(0.999999, random())) *
+      (conversationReasoningMaxTokens - conversationReasoningMinTokens + 1),
+  );
+}
 export function conversationOutputTokens(random = Math.random): number {
   return 2000 + Math.floor(Math.max(0, Math.min(0.999999, random())) * 1001);
 }

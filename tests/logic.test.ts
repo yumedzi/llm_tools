@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { allocationTotal, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelPriceOptions, models, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
+import { allocationTotal, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningMaxTokens, conversationReasoningMinTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelPriceOptions, models, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
 import { countClaudeTokens, countOpenAITokens } from '../src/tokenizers.ts';
 import type { FlowEntry } from '../src/logic.ts';
 const call = (tokens = 2400, id = 1): FlowEntry => ({ id, kind: 'mcp-result', name: 'Search', tokens, originalTokens: tokens, summarized: false, toolId: 'search' });
@@ -99,8 +99,12 @@ describe('Retained tool and skill context', () => {
     assert.equal(conversationImageTokens, 1560);
     assert.equal(conversationImageInputTokens, 2160);
   });
-  it('uses a distinct 1.2K reasoning budget in addition to visible assistant output', () => {
-    assert.equal(conversationReasoningTokens, 1200);
+  it('varies reasoning tokens between 800 and 1,600 in addition to visible output', () => {
+    assert.equal(conversationReasoningMinTokens, 800);
+    assert.equal(conversationReasoningMaxTokens, 1600);
+    assert.equal(conversationReasoningTokens(() => 0), 800);
+    assert.equal(conversationReasoningTokens(() => 0.999999), 1600);
+    assert.equal(conversationReasoningTokens(() => 1), 1600);
   });
   it('accumulates identical calls as separate retained responses', () => {
     const first = retainCall([], call())!;
