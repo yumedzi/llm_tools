@@ -664,13 +664,18 @@ export function FlowLabView() {
   const skills = entries
     .filter((entry) => entry.kind === "skill-result")
     .reduce((total, entry) => total + entry.tokens, 0);
-  const messageInput = entries
-    .filter((entry) => entry.kind === "message")
+  const currentMessageInput = entries
+    .filter((entry) => entry.kind === "message" && !entry.cached)
     .reduce((total, entry) => total + (entry.inputTokens ?? 0), 0);
-  const messageOutput = entries
-    .filter((entry) => entry.kind === "message")
+  const currentMessageOutput = entries
+    .filter((entry) => entry.kind === "message" && !entry.cached)
     .reduce((total, entry) => total + (entry.outputTokens ?? 0), 0);
-  const reasoning = entries.reduce(
+  const cachedMessageTokens = entries
+    .filter((entry) => entry.kind === "message" && entry.cached)
+    .reduce((total, entry) => total + entry.tokens, 0);
+  const currentReasoning = entries
+    .filter((entry) => entry.kind === "message" && !entry.cached)
+    .reduce(
     (total, entry) => total + (entry.reasoningTokens ?? 0),
     0,
   );
@@ -932,9 +937,9 @@ export function FlowLabView() {
               return [
                 <HoverTooltip
                   key={`${entry.id}-input`}
-                  className="meter-segment input-meter-segment"
+                  className={`meter-segment input-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
                   style={{ width: `${((entry.inputTokens ?? 0) / flowCapacity) * 100}%` }}
-                  label={`Input: ${formatNumber(entry.inputTokens ?? 0)} tokens supplied to this turn${entry.imageTokens ? `, including ${formatNumber(entry.imageTokens)} image visual tokens` : ""}.`}
+                  label={`${entry.cached ? "Cached " : ""}input: ${formatNumber(entry.inputTokens ?? 0)} tokens supplied to this turn${entry.imageTokens ? `, including ${formatNumber(entry.imageTokens)} image visual tokens` : ""}.${entry.cached ? " This older conversation turn is resent as cached input." : ""}`}
                 >
                   <span />
                 </HoverTooltip>,
@@ -942,7 +947,7 @@ export function FlowLabView() {
                   ? [
                       <HoverTooltip
                         key={`${entry.id}-reasoning`}
-                        className="meter-segment reasoning-meter-segment"
+                        className={`meter-segment reasoning-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
                         style={{ width: `${(reasoningTokens / flowCapacity) * 100}%` }}
                         label={`Thinking: ${formatNumber(reasoningTokens)} internal tokens generated before the visible answer. They are output-priced and retained as part of this conversation turn.`}
                       >
@@ -952,7 +957,7 @@ export function FlowLabView() {
                   : []),
                 <HoverTooltip
                   key={`${entry.id}-output`}
-                  className="meter-segment output-meter-segment"
+                  className={`meter-segment output-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
                   style={{ width: `${((entry.outputTokens ?? 0) / flowCapacity) * 100}%` }}
                   label={`Output: ${formatNumber(entry.outputTokens ?? 0)} visible assistant-response tokens retained for later turns.`}
                 >
@@ -987,21 +992,21 @@ export function FlowLabView() {
           </span>
           <span>
             <i className="input-legend" />
-            Input {compact(messageInput)}
+            Current input {compact(currentMessageInput)}
           </span>
-          {reasoning > 0 && (
+          {currentReasoning > 0 && (
             <span>
               <i className="reasoning-legend" />
-              Thinking {compact(reasoning)}
+              Current thinking {compact(currentReasoning)}
             </span>
           )}
           <span>
             <i className="output-legend" />
-            Output {compact(messageOutput)}
+            Current output {compact(currentMessageOutput)}
           </span>
           {entries.some((entry) => entry.kind === "message" && entry.cached) && (
             <span className="cached-message-note">
-              Cached turns use the cached-input rate
+              <i className="cached-legend" /> Cached conversation {compact(cachedMessageTokens)}
             </span>
           )}
           <strong>{formatNumber(flowCapacity - used)} free</strong>
@@ -1224,19 +1229,19 @@ export function FlowLabView() {
                   {entry.kind === "message" && !entry.summarized ? (
                     <div className="message-token-breakdown">
                       <span className="message-input">
-                        <small>INPUT</small>
+                        <small>{entry.cached ? "CACHED INPUT" : "INPUT"}</small>
                         <strong>{formatNumber(entry.inputTokens ?? 0)}</strong>
                         {entry.imageTokens && <em>{formatNumber(entry.imageTokens)} image</em>}
                       </span>
                       <span className="message-thinking">
                         <small>THINKING</small>
                         <strong>{formatNumber(entry.reasoningTokens ?? 0)}</strong>
-                        <em>output-priced</em>
+                        <em>{entry.cached ? "cached turn" : "output-priced"}</em>
                       </span>
                       <span className="message-output">
                         <small>OUTPUT</small>
                         <strong>{formatNumber(entry.outputTokens ?? 0)}</strong>
-                        <em>visible answer</em>
+                        <em>{entry.cached ? "cached turn" : "visible answer"}</em>
                       </span>
                     </div>
                   ) : (

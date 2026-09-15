@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { allocationTotal, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningMaxTokens, conversationReasoningMinTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelPriceOptions, models, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
-import { countClaudeTokens, countOpenAITokens } from '../src/tokenizers.ts';
+import { countClaudeTokens, countOpenAITokens, openAITokenIds, openAITokenPieces } from '../src/tokenizers.ts';
 import type { FlowEntry } from '../src/logic.ts';
 const call = (tokens = 2400, id = 1): FlowEntry => ({ id, kind: 'mcp-result', name: 'Search', tokens, originalTokens: tokens, summarized: false, toolId: 'search' });
 
@@ -39,6 +39,17 @@ describe('Token estimates and counters', () => {
     const haiku = models.find(model => model.name === 'Claude Haiku 4.5')!;
     assert.equal(haiku.countAdjustment, 0.7);
     assert.equal(countModelTokens(text, haiku), Math.ceil(countClaudeTokens(text) * 0.7));
+  });
+  it('exposes exact OpenAI token IDs for the o200k_base visualization', () => {
+    const text = 'Hello, world!';
+    const ids = openAITokenIds(text);
+    assert.equal(ids.length, countOpenAITokens(text));
+    assert.ok(ids.every(id => Number.isSafeInteger(id) && id >= 0));
+    assert.equal(openAITokenIds(text, 1).length, 1);
+    assert.deepEqual(openAITokenIds('', 20), []);
+    const pieces = openAITokenPieces(text);
+    assert.deepEqual(pieces.map(piece => piece.id), ids);
+    assert.equal(pieces.map(piece => piece.text).join(''), text);
   });
   it('uses checked-in standard input pricing for every displayed model', () => {
     const byId = Object.fromEntries(models.map(model => [model.id, model]));

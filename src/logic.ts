@@ -55,7 +55,7 @@ export function requestCost(
 export const samples = {
   prose: 'You are a thoughtful AI assistant. Explain how large language models turn text into tokens, and why every token matters.\n\nUse a simple analogy, keep your answer concise, and include one practical example. Make it something a curious beginner would understand.',
   code: 'async function summarize(document: string) {\n  const sentences = document.split(".");\n  return {\n    summary: sentences.slice(0, 3).join("."),\n    wordCount: document.trim().split(/\\s+/).length,\n  };\n}',
-  multilingual: 'Hello, world! Bonjour le monde! Hola, mundo!\nこんにちは、世界！ 你好，世界！\n\nThe same idea can take a different number of tokens in every language. Compare scripts, punctuation, and whitespace.',
+  multilingual: 'Hello, world! Bonjour le monde! Hola, mundo!\nこんにちは、世界！ 你好，世界！\n\nГей, десь там, де чорні води\n\nHej sokoły! Omijajcie góry, lasy, doły.',
 };
 export function visualChunks(text: string): string[] {
   return (text.match(/\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) ?? []).flatMap(piece => {

@@ -12,6 +12,7 @@ import {
   CheckCheck,
   ChevronDown,
   CircleHelp,
+  CircleDollarSign,
   Code2,
   Copy,
   Database,
@@ -39,6 +40,7 @@ import {
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
+  Smile,
   Sparkles,
   Terminal,
   Trash2,
@@ -61,13 +63,12 @@ import {
   flowCapacity,
   flowUsed,
   formatNumber,
-  inputCost,
   models,
   retainCall,
   samples,
-  visualChunks,
   wordCount,
 } from "./logic";
+import { openAITokenPieces } from "./tokenizers";
 import type { FlowEntry } from "./logic";
 import {
   IconButton,
@@ -135,6 +136,8 @@ export default function App() {
   );
   const [guide, setGuide] = useState(false);
   const [present, setPresent] = useState(false);
+  const [slopMode, setSlopMode] = useState(false);
+  const brandClicks = useRef(0);
   const [visited, setVisited] = usePersistentState<string[]>(
     "context-lab:visited",
     ["tokenizer"],
@@ -148,6 +151,11 @@ export default function App() {
     setVisited((v) => Array.from(new Set([...v, next])));
     window.scrollTo({ top: 0, behavior: "instant" });
   };
+  const activateBrand = () => {
+    brandClicks.current += 1;
+    if (brandClicks.current >= 5) setSlopMode(true);
+    navigate("tokenizer");
+  };
   useEffect(() => {
     document.title = `${active.name} — Context Lab`;
   }, [active.name]);
@@ -159,15 +167,26 @@ export default function App() {
           href="#"
           onClick={(e) => {
             e.preventDefault();
-            navigate("tokenizer");
+            activateBrand();
           }}
         >
           <span className="brand-mark">
             <Layers3 size={23} strokeWidth={1.65} />
           </span>
-          <span>
-            context<span className="brand-light">lab</span>
-            <span className="brand-dot">.</span>
+          <span className="brand-copy" style={{ display: "grid" }}>
+            {slopMode ? (
+              <>
+                <span>SLOP<span className="brand-light">lab</span></span>
+                <span
+                  className="brand-academy"
+                  style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, color: "var(--mint)", fontSize: 7, fontWeight: 550, letterSpacing: "0.8px", lineHeight: 1, whiteSpace: "nowrap" }}
+                >
+                  <Smile size={11} /> AI SLOP Academy
+                </span>
+              </>
+            ) : (
+              <span>context<span className="brand-light">lab</span><span className="brand-dot">.</span></span>
+            )}
           </span>
         </a>
         <div className="workspace-label">
@@ -238,9 +257,30 @@ export default function App() {
       <div className="main-shell">
         <header className="topbar">
           <div className="breadcrumb">
-            <span className="mobile-brand">
-              <Layers3 size={20} /> contextlab.
-            </span>
+            <button
+              type="button"
+              className="mobile-brand brand-title-trigger"
+              aria-label="Context Lab home"
+              onClick={activateBrand}
+              style={{ border: 0, background: "transparent", padding: 0, textAlign: "left" }}
+            >
+              <Layers3 size={20} />
+              <span className="brand-copy" style={{ display: "grid" }}>
+                {slopMode ? (
+                  <>
+                    <span>SLOP<span className="brand-light">lab</span></span>
+                    <span
+                      className="brand-academy"
+                      style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2, color: "var(--mint)", fontSize: 6, fontWeight: 550, letterSpacing: "0.7px", lineHeight: 1, whiteSpace: "nowrap" }}
+                    >
+                      <Smile size={9} /> AI SLOP Academy
+                    </span>
+                  </>
+                ) : (
+                  <span>contextlab.</span>
+                )}
+              </span>
+            </button>
             <span className="desktop-breadcrumb">
               Playground <span>/</span> <strong>{active.name}</strong>
             </span>
@@ -335,7 +375,7 @@ function Tokenizer() {
     (v): v is string => typeof v === "string" && v.length <= 100000,
   );
   const [metric, setMetric] = useState<"tokens" | "cost">("tokens");
-  const [costDirection, setCostDirection] = useState<"input" | "output">(
+  const [costDirection, setCostDirection] = useState<"input" | "cached-input" | "output">(
     "input",
   );
   const [costMultiplier, setCostMultiplier] = useState<1 | 1000>(1);
@@ -346,25 +386,26 @@ function Tokenizer() {
     setCopyMessage("");
   }, [text]);
   const [sample, setSample] = useState<keyof typeof samples>("prose");
-  const [inspect, setInspect] = useState(true);
+  const [inputView, setInputView] = useState<"text" | "tokens">("text");
+  const pricingAnchor = useRef<HTMLDivElement>(null);
   const counts = useMemo(() => compareModelTokens(text), [text]);
   const costs = useMemo(
     () =>
       models.map((model, index) =>
-        model.pricing.map((price) => inputCost(counts[index], price)),
-      ),
-    [counts],
-  );
-  const outputCosts = useMemo(
-    () =>
-      models.map((model, index) =>
         model.pricing.map(
-          (price) => (counts[index] * price.output) / 1000000,
+          (price) =>
+            (counts[index] *
+              (costDirection === "input"
+                ? price.input
+                : costDirection === "cached-input"
+                  ? price.cachedInput
+                  : price.output)) /
+            1000000,
         ),
       ),
-    [counts],
+    [counts, costDirection],
   );
-  const selectedCosts = costDirection === "input" ? costs : outputCosts;
+  const selectedCosts = costs;
   const values =
     metric === "tokens"
       ? counts
@@ -380,8 +421,18 @@ function Tokenizer() {
       : metric === "tokens"
         ? 100
         : 0.001;
-  const tokens = counts[2];
-  const chunks = useMemo(() => visualChunks(text.slice(0, 1800)), [text]);
+  const openAITokens = counts[3] ?? 0;
+  const openAIPieces = useMemo(() => openAITokenPieces(text, 160), [text]);
+  useEffect(() => {
+    if (!showRates) return;
+    const closeOnFocusOutside = (event: FocusEvent) => {
+      if (event.target instanceof Node && !pricingAnchor.current?.contains(event.target)) {
+        setShowRates(false);
+      }
+    };
+    document.addEventListener("focusin", closeOnFocusOutside);
+    return () => document.removeEventListener("focusin", closeOnFocusOutside);
+  }, [showRates]);
   async function copy() {
     try {
       await navigator.clipboard.writeText(text);
@@ -414,70 +465,120 @@ function Tokenizer() {
         <section className="panel input-panel">
           <div className="panel-header">
             <SectionLabel icon={FileText}>Your input</SectionLabel>
-            <span className="badge">PLAIN TEXT</span>
-          </div>
-          <div className="sample-toolbar">
-            <span>Start with a sample</span>
-            <div className="sample-buttons">
-              <IconButton
-                icon={FileText}
-                className={`btn-small btn-ghost ${sample === "prose" && text === samples.prose ? "chosen" : ""}`}
-                onClick={() => {
-                  setText(samples.prose);
-                  setSample("prose");
-                }}
-              >
-                Prose
-              </IconButton>
-              <IconButton
-                icon={Code2}
-                className={`btn-small btn-ghost ${sample === "code" && text === samples.code ? "chosen" : ""}`}
-                onClick={() => {
-                  setText(samples.code);
-                  setSample("code");
-                }}
-              >
-                Code
-              </IconButton>
-              <IconButton
-                icon={Globe2}
-                className={`btn-small btn-ghost ${sample === "multilingual" && text === samples.multilingual ? "chosen" : ""}`}
-                onClick={() => {
-                  setText(samples.multilingual);
-                  setSample("multilingual");
-                }}
-              >
-                Multilingual
-              </IconButton>
+            <div className="input-header-actions">
+              <div className="segmented input-view-switch" role="group" aria-label="Input view">
+                <IconButton
+                  icon={FileText}
+                  className={inputView === "text" ? "active" : ""}
+                  onClick={() => setInputView("text")}
+                  aria-pressed={inputView === "text"}
+                >
+                  Text
+                </IconButton>
+                <IconButton
+                  icon={ScanText}
+                  className={inputView === "tokens" ? "active" : ""}
+                  onClick={() => setInputView("tokens")}
+                  aria-pressed={inputView === "tokens"}
+                >
+                  Tokens
+                </IconButton>
+              </div>
             </div>
           </div>
-          <div className="text-editor">
-            <span className="editor-gutter" aria-hidden="true">
-              01
-            </span>
-            <textarea
-              aria-label="Text to tokenize"
-              maxLength={100000}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="A thought, a paragraph, a little code… Start typing to see what happens."
-              spellCheck={false}
-            />
-            <span className="editor-corner">
-              <IconButton
-                icon={copied ? Check : Copy}
-                aria-label={copied ? "Copied text" : "Copy input text"}
-                onClick={copy}
-                disabled={!text}
-              />
-              <IconButton
-                icon={Trash2}
-                aria-label="Clear input text"
-                onClick={() => setText("")}
-                disabled={!text}
-              />
-            </span>
-          </div>
+          {inputView === "text" ? (
+            <>
+              <div className="sample-toolbar">
+                <span>Start with a sample</span>
+                <div className="sample-buttons">
+                  <IconButton
+                    icon={FileText}
+                    className={`btn-small btn-ghost ${sample === "prose" && text === samples.prose ? "chosen" : ""}`}
+                    onClick={() => {
+                      setText(samples.prose);
+                      setSample("prose");
+                    }}
+                  >
+                    Prose
+                  </IconButton>
+                  <IconButton
+                    icon={Code2}
+                    className={`btn-small btn-ghost ${sample === "code" && text === samples.code ? "chosen" : ""}`}
+                    onClick={() => {
+                      setText(samples.code);
+                      setSample("code");
+                    }}
+                  >
+                    Code
+                  </IconButton>
+                  <IconButton
+                    icon={Globe2}
+                    className={`btn-small btn-ghost ${sample === "multilingual" && text === samples.multilingual ? "chosen" : ""}`}
+                    onClick={() => {
+                      setText(samples.multilingual);
+                      setSample("multilingual");
+                    }}
+                  >
+                    Multilingual
+                  </IconButton>
+                </div>
+              </div>
+              <div className="text-editor">
+                <span className="editor-gutter" aria-hidden="true">
+                  01
+                </span>
+                <textarea
+                  aria-label="Text to tokenize"
+                  maxLength={100000}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="A thought, a paragraph, a little code… Start typing to see what happens."
+                  spellCheck={false}
+                />
+                <span className="editor-corner">
+                  <IconButton
+                    icon={copied ? Check : Copy}
+                    aria-label={copied ? "Copied text" : "Copy input text"}
+                    onClick={copy}
+                    disabled={!text}
+                  />
+                  <IconButton
+                    icon={Trash2}
+                    aria-label="Clear input text"
+                    onClick={() => setText("")}
+                    disabled={!text}
+                  />
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="token-map" aria-label="Exact o200k_base token map">
+              <span className="token-map-label">Exact OpenAI token map</span>
+              <div className="token-map-pieces">
+                {openAIPieces.length ? (
+                  openAIPieces.map((piece, index) => (
+                    <span
+                      className={`token-piece token-piece-${index % 6}`}
+                      key={`${piece.id}-${index}`}
+                      title={`Token ID ${piece.id}`}
+                    >
+                      <span className="token-piece-text">
+                        {piece.text.replaceAll(" ", "·").replaceAll("\n", "↵").replaceAll("\t", "⇥") || "∅"}
+                      </span>
+                      <small>{piece.id}</small>
+                    </span>
+                  ))
+                ) : (
+                  <span className="muted">Your tokens will appear here.</span>
+                )}
+                {openAITokens > openAIPieces.length && (
+                  <span className="token-map-more">
+                    +{formatNumber(openAITokens - openAIPieces.length)} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
           <div className="input-stats" aria-live="polite">
             <div>
               <strong>{formatNumber(wordCount(text))}</strong>
@@ -490,22 +591,15 @@ function Tokenizer() {
               <span>characters</span>
             </div>
             <div className="highlight-stat">
-              <strong>~{formatNumber(tokens)}</strong>
-              <span>Claude · ctoc estimate</span>
+              <strong>{formatNumber(openAITokens)}</strong>
+              <span>OpenAI · exact o200k_base</span>
             </div>
-          </div>
-          <div className="input-footer" role="status">
-            <span className="status-dot" />
-            {copyMessage ||
-              (text.length >= 100000
-                ? "100,000 character input limit reached"
-                : "Changes update instantly")}
-            <span className="mono">UTF-8</span>
           </div>
         </section>
         <section className="panel chart-panel">
           <div className="panel-header">
             <SectionLabel icon={AudioLines}>Model comparison</SectionLabel>
+            <div className="chart-header-actions">
             <div className="segmented">
               <IconButton
                 icon={ScanText}
@@ -524,10 +618,33 @@ function Tokenizer() {
                 Cost
               </IconButton>
             </div>
+            <div
+              className="chart-pricing-anchor"
+              ref={pricingAnchor}
+            >
+              <IconButton
+                icon={CircleDollarSign}
+                className={`btn-ghost chart-pricing-button ${showRates ? "active" : ""}`}
+                onClick={() => setShowRates((value) => !value)}
+                aria-label="Open API pricing reference"
+                title="Open API pricing reference"
+                aria-expanded={showRates}
+              />
+              {showRates && (
+                <div className="chart-pricing-popover" role="dialog" aria-label="API pricing reference">
+                  <div className="chart-pricing-popover-header">
+                    <strong>API pricing reference</strong>
+                    <span>USD per 1M tokens</span>
+                  </div>
+                  <PricingTable />
+                  <PricingSources />
+                </div>
+              )}
+            </div>
+            </div>
           </div>
           {metric === "cost" && (
             <div className="chart-cost-controls">
-              <span>Price this text as</span>
               <div
                 className="segmented"
                 role="group"
@@ -540,6 +657,14 @@ function Tokenizer() {
                   aria-pressed={costDirection === "input"}
                 >
                   Input
+                </IconButton>
+                <IconButton
+                  icon={History}
+                  className={costDirection === "cached-input" ? "active" : ""}
+                  onClick={() => setCostDirection("cached-input")}
+                  aria-pressed={costDirection === "cached-input"}
+                >
+                  Cached
                 </IconButton>
                 <IconButton
                   icon={ArrowUpRight}
@@ -562,14 +687,7 @@ function Tokenizer() {
               </IconButton>
             </div>
           )}
-          <div className="chart-description">
-            <span>
-              {metric === "tokens"
-                ? "One input. Different token footprints."
-                : `Standard short-context ${costDirection} cost for ${costMultiplier.toLocaleString()} equivalent ${costDirection}${costMultiplier === 1 ? "" : "s"}.`}
-            </span>
-            <span className="badge badge-purple">LOCAL TOKENIZERS</span>
-          </div>
+
           <div className="model-chart">
             {models.map((m, i) => {
               const modelCosts = selectedCosts[i].map(
@@ -642,93 +760,8 @@ function Tokenizer() {
                 : `$${max < 1e-8 ? "0" : max.toFixed(6)}`}
             </span>
           </div>
-          <div className="chart-bottom">
-            <span>
-              <Info size={14} />
-              Standard API list prices, retrieved 2026-09-13.
-            </span>
-            <IconButton
-              icon={SlidersHorizontal}
-              className="btn-ghost btn-small"
-              onClick={() => setShowRates((v) => !v)}
-              aria-expanded={showRates}
-            >
-              Pricing
-            </IconButton>
-          </div>
         </section>
       </div>
-      {showRates && (
-        <section className="panel assumptions-panel pricing-panel">
-          <SectionLabel icon={SlidersHorizontal}>
-            API pricing reference{" "}
-            <span className="muted section-subtitle">USD per 1M tokens</span>
-          </SectionLabel>
-          <p>
-            Cost mode uses each model's standard short-context input price. The
-            GPT-5.6 Sol, Terra, and Luna rows are separate model tiers. Cached
-            input and output prices are listed for reference and are not
-            included in the chart calculation.
-          </p>
-          <PricingTable />
-          <PricingSources />
-        </section>
-      )}
-      <section className="panel token-view">
-        <div className="panel-header">
-          <SectionLabel icon={Braces}>
-            Under the hood{" "}
-            <span className="muted section-subtitle">A look at the pieces</span>
-          </SectionLabel>
-          <IconButton
-            icon={inspect ? Minus : Plus}
-            className="btn-ghost btn-small"
-            onClick={() => setInspect((v) => !v)}
-            aria-expanded={inspect}
-          >
-            {inspect ? "Hide" : "Show"} visualization
-          </IconButton>
-        </div>
-        {inspect && (
-          <>
-            <div className="token-chunks" aria-label="Illustrative text chunks">
-              {chunks.length ? (
-                chunks.map((chunk, i) =>
-                  /^\s+$/.test(chunk) ? (
-                    <span className="token-space" key={i}>
-                      {chunk}
-                    </span>
-                  ) : (
-                    <span
-                      className={`token-chunk token-color-${i % 6}`}
-                      key={i}
-                    >
-                      {chunk}
-                    </span>
-                  ),
-                )
-              ) : (
-                <span className="muted">
-                  Your text will appear here as illustrative chunks.
-                </span>
-              )}
-              {text.length > 1800 && (
-                <span className="muted">
-                  {" "}
-                  … preview limited to 1,800 characters
-                </span>
-              )}
-            </div>
-            <div className="token-view-footer">
-              <span>
-                <span className="mini-swatch" /> Each color marks a chunk, not a
-                word.
-              </span>
-              <span>Illustrative segmentation · not exact token IDs</span>
-            </div>
-          </>
-        )}
-      </section>
       <div className="learning-callout">
         <div className="callout-icon">
           <Lightbulb size={20} />

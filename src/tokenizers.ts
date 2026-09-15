@@ -61,6 +61,23 @@ export function countOpenAITokens(text: string): number {
   return openai.encode(text, [], []).length;
 }
 
+export function openAITokenIds(text: string, limit = 160): number[] {
+  if (!text || limit <= 0) return [];
+  openai ??= new Tiktoken(o200kBase);
+  return Array.from(openai.encode(text, [], []).slice(0, limit));
+}
+
+export type OpenAITokenPiece = { id: number; text: string };
+
+export function openAITokenPieces(text: string, limit = 160): OpenAITokenPiece[] {
+  if (!text || limit <= 0) return [];
+  openai ??= new Tiktoken(o200kBase);
+  return openai.encode(text, [], []).slice(0, limit).map((id) => ({
+    id,
+    text: openai!.decode([id]),
+  }));
+}
+
 export function countTokens(text: string, tokenizer: TokenizerKind): number {
   return tokenizer === 'ctoc' ? countClaudeTokens(text) : countOpenAITokens(text);
 }
