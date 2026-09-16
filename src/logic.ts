@@ -128,15 +128,15 @@ export const flowMcpTools = {
 } as const;
 export function flowUsed(entries: FlowEntry[]): number { return flowBase + entries.reduce((sum, e) => sum + e.tokens, 0); }
 export function retainCall(entries: FlowEntry[], entry: FlowEntry): FlowEntry[] | null {
-  return flowUsed(entries) + entry.tokens <= flowCapacity ? [...entries, entry] : null;
+  const next = entries.map(item => ({ ...item, cached: true }));
+  return flowUsed(next) + entry.tokens <= flowCapacity ? [...next, { ...entry, cached: false }] : null;
 }
 export function hasLoadedMcpSchema(entries: FlowEntry[], toolId: string): boolean {
   return entries.some(entry => entry.kind === 'mcp-schema' && entry.toolId === toolId);
 }
 export function retainConversation(entries: FlowEntry[], entry: FlowEntry): FlowEntry[] | null {
   const round = Math.max(0, ...entries.filter(item => item.kind === 'message').map(item => item.round ?? 0)) + 1;
-  const next = entries.map(item => item.kind === 'message' ? { ...item, cached: true } : item);
-  return retainCall(next, { ...entry, kind: 'message', round, cached: false });
+  return retainCall(entries, { ...entry, kind: 'message', round, cached: false });
 }
 export function compactEntries(entries: FlowEntry[]): FlowEntry[] {
   if (!entries.length || (entries.length === 1 && entries[0].summarized)) {

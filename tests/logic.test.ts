@@ -155,10 +155,13 @@ describe('Retained tool and skill context', () => {
     assert.equal(hasLoadedMcpSchema(withSchema, 'search'), true);
     assert.equal(hasLoadedMcpSchema(withSchema, 'database'), false);
   });
-  it('marks prior conversation rounds cached without reducing their tokens', () => {
-    const first = retainConversation([], { id: 1, kind: 'message', name: 'Conversation round', tokens: 600, originalTokens: 600, summarized: false })!;
-    const second = retainConversation(first, { id: 2, kind: 'message', name: 'Conversation round', tokens: 600, originalTokens: 600, summarized: false })!;
-    assert.deepEqual(second.map(entry => [entry.round, entry.cached]), [[1, true], [2, false]]);
-    assert.equal(flowUsed(second), flowBase + 1200);
+  it('marks every prior retained entry cached without reducing its tokens', () => {
+    const schema: FlowEntry = { id: 1, kind: 'mcp-schema', name: 'Search schema loaded', tokens: 2400, originalTokens: 2400, summarized: false, toolId: 'search' };
+    const result = retainCall([schema], call(2400, 2))!;
+    const conversation = retainConversation(result, { id: 3, kind: 'message', name: 'Conversation round', tokens: 600, originalTokens: 600, summarized: false })!;
+    assert.deepEqual(conversation.map(entry => [entry.kind, entry.cached]), [
+      ['mcp-schema', true], ['mcp-result', true], ['message', false],
+    ]);
+    assert.equal(flowUsed(conversation), flowBase + 5400);
   });
 });

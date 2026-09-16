@@ -587,7 +587,7 @@ function flowEntryExplanation(entry: FlowEntry) {
     return "Conversation message with reasoning: the model generated internal reasoning in addition to its visible final answer. Both are output tokens, billed at the output rate, and retained when the host keeps the turn in context.";
   }
   return entry.cached
-    ? "Cached message: an older conversation round retained by the host. It still uses context space, but can qualify for a cached-input price." 
+    ? "Cached context: this retained entry came from an earlier request. It still uses context space, but can qualify for a cached-input price when the host resends it."
     : entry.imageTokens
       ? "Image attachment: a text instruction plus image visual tokens and generated assistant output retained for later turns. This simulation uses a standard-tier 1920x1080 image at 1,560 visual tokens."
       : "Current message: the latest conversation round, including the user's input and generated assistant output, retained for the next turn.";
@@ -670,8 +670,8 @@ export function FlowLabView() {
   const currentMessageOutput = entries
     .filter((entry) => entry.kind === "message" && !entry.cached)
     .reduce((total, entry) => total + (entry.outputTokens ?? 0), 0);
-  const cachedMessageTokens = entries
-    .filter((entry) => entry.kind === "message" && entry.cached)
+  const cachedContextTokens = entries
+    .filter((entry) => entry.cached)
     .reduce((total, entry) => total + entry.tokens, 0);
   const currentReasoning = entries
     .filter((entry) => entry.kind === "message" && !entry.cached)
@@ -1004,9 +1004,9 @@ export function FlowLabView() {
             <i className="output-legend" />
             Current output {compact(currentMessageOutput)}
           </span>
-          {entries.some((entry) => entry.kind === "message" && entry.cached) && (
+          {entries.some((entry) => entry.cached) && (
             <span className="cached-message-note">
-              <i className="cached-legend" /> Cached conversation {compact(cachedMessageTokens)}
+              <i className="cached-legend" /> Cached context {compact(cachedContextTokens)}
             </span>
           )}
           <strong>{formatNumber(flowCapacity - used)} free</strong>
