@@ -102,7 +102,7 @@ const tabs = [
   },
   {
     id: "flow",
-    name: "MCP & skill flow",
+    name: "Session Emulation",
     short: "Tool flow",
     icon: Workflow,
     title: "One call. A lasting footprint.",
@@ -125,6 +125,39 @@ const tabs = [
   },
 ] as const;
 type TabId = (typeof tabs)[number]["id"];
+const slopLabCopy: Record<
+  TabId,
+  { name: string; short: string; title: string; subtitle: string; label: string }
+> = {
+  tokenizer: {
+    name: "Slopinizer",
+    short: "Slopinize",
+    title: "Every word can become premium slop.",
+    subtitle: "Feed it a thought. Watch it emerge fluent, glossy, and gloriously vague.",
+    label: "Measure the magnificent mush",
+  },
+  context: {
+    name: "Slop Context",
+    short: "Slop context",
+    title: "A window into the slop dimension.",
+    subtitle: "See how much context it takes to keep the vibes technically aligned.",
+    label: "Protect the precious slop budget",
+  },
+  flow: {
+    name: "Slop Flow",
+    short: "Slop flow",
+    title: "One tool call. Infinite synergy.",
+    subtitle: "Trace the signals, retain the buzzwords, and let the context marinate.",
+    label: "Follow the value-add journey",
+  },
+  prompt: {
+    name: "Slop Constructor",
+    short: "Construct",
+    title: "Build boldly. Clarify never.",
+    subtitle: "Assemble a prompt with maximum polish and a strategically flexible point.",
+    label: "Engineer the perfect nothingburger",
+  },
+};
 const tabIsValid = (value: unknown): value is TabId =>
   tabs.some((t) => t.id === value);
 
@@ -138,6 +171,7 @@ export default function App() {
   const [present, setPresent] = useState(false);
   const [slopMode, setSlopMode] = useState(false);
   const brandClicks = useRef(0);
+  const slopModeActivatedAt = useRef(0);
   const [visited, setVisited] = usePersistentState<string[]>(
     "context-lab:visited",
     ["tokenizer"],
@@ -145,15 +179,28 @@ export default function App() {
       Array.isArray(v) &&
       v.every((x) => typeof x === "string" && tabs.some((t) => t.id === x)),
   );
-  const active = tabs.find((t) => t.id === tab)!;
+  const displayedTabs = slopMode
+    ? tabs.map((tab) => ({ ...tab, ...slopLabCopy[tab.id] }))
+    : tabs;
+  const active = displayedTabs.find((t) => t.id === tab)!;
   const navigate = (next: TabId) => {
     setTab(next);
     setVisited((v) => Array.from(new Set([...v, next])));
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   const activateBrand = () => {
+    if (slopMode) {
+      if (Date.now() - slopModeActivatedAt.current < 750) return;
+      brandClicks.current = 0;
+      setSlopMode(false);
+      navigate("tokenizer");
+      return;
+    }
     brandClicks.current += 1;
-    if (brandClicks.current >= 5) setSlopMode(true);
+    if (brandClicks.current >= 5) {
+      slopModeActivatedAt.current = Date.now();
+      setSlopMode(true);
+    }
     navigate("tokenizer");
   };
   useEffect(() => {
@@ -193,13 +240,13 @@ export default function App() {
           <span className="tiny-icon">
             <FlaskConical size={14} />
           </span>{" "}
-          Your learning workspace <ChevronDown size={13} />
+          {slopMode ? "Vibes engineering workshop" : "LLM mechanics workshop"} <ChevronDown size={13} />
         </div>
         <div className="nav-eyebrow">
           THE PLAYGROUND <span>04</span>
         </div>
         <nav className="nav-list">
-          {tabs.map((t) => (
+          {displayedTabs.map((t) => (
             <button
               type="button"
               key={t.id}
@@ -220,9 +267,9 @@ export default function App() {
           </div>
           <h3>
             A little context.
-            <br />A lot of clarity.
+            <br />{slopMode ? "A lot of slop." : "A lot of clarity."}
           </h3>
-          <p>No black boxes. Just hands-on experiments.</p>
+          <p>{slopMode ? "No clear answers. Just hands-on vibes." : "No black boxes. Just hands-on experiments."}</p>
           <div className="lesson-progress">
             {tabs.map((t) => (
               <span
@@ -305,7 +352,7 @@ export default function App() {
           </div>
         </header>
         <div className="mobile-tabs" role="navigation" aria-label="Labs">
-          {tabs.map((t) => (
+          {displayedTabs.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -348,7 +395,7 @@ export default function App() {
           </div>
           <footer className="page-footer">
             <span className="footer-curiosity">
-              <Rocket size={13} /> Built for curiosity.
+              <Rocket size={13} /> {slopMode ? "Built for vibes." : "Built for curiosity."}
             </span>
             <span className="footer-attribution">
               <span>© 2016-2026</span>
@@ -357,8 +404,11 @@ export default function App() {
               </a>
             </span>
             <span className="footer-mantra">
-              CONTEXT LAB <span className="footer-dot">·</span> EXPERIMENT.
-              UNDERSTAND. REPEAT.
+              {slopMode ? (
+                <>SLOP LAB <span className="footer-dot">·</span> GENERATE. GESTURE. REPEAT.</>
+              ) : (
+                <>CONTEXT LAB <span className="footer-dot">·</span> EXPERIMENT. UNDERSTAND. REPEAT.</>
+              )}
             </span>
           </footer>
         </main>

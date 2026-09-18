@@ -64,7 +64,7 @@ try {
   button('Reset'); noOverflow('Desktop context');
   capture('desktop-context.png');
 
-  nav('MCP & skill flow 03');
+  nav('Session Emulation 03');
   check('Trail auto-scroll is enabled by default', 'document.querySelector(".trail-auto-scroll input").checked');
   check('Flow pricing estimate stays hidden until requested', '!document.querySelector(".flow-pricing-popover")');
   activate('[aria-label="Open pricing settings"]');
@@ -125,7 +125,7 @@ try {
 
   for (const width of [390, 320, 768]) {
     browser('set', 'viewport', String(width), '844');
-    for (const [name, mobile, id] of [['Tokenizer 01','Tokens','tokenizer'],['Context window 02','Context','context'],['MCP & skill flow 03','Tool flow','flow'],['Prompt sandbox 04','Prompts','prompt']]) {
+    for (const [name, mobile, id] of [['Tokenizer 01','Tokens','tokenizer'],['Context window 02','Context','context'],['Session Emulation 03','Tool flow','flow'],['Prompt sandbox 04','Prompts','prompt']]) {
       nav(width <= 760 ? mobile : name);
       noOverflow(`${width}px ${id}`);
       check(`${width}px ${id}: heading visible`, '!!document.querySelector("h1") && document.querySelector("h1").getBoundingClientRect().width>0');
@@ -146,6 +146,10 @@ try {
   nav('Prompt sandbox 04');
   check('Invalid saved prompt recovers gracefully', 'document.querySelectorAll(".prompt-block").length===5');
   nav('Tokenizer 01');
+  for (let index = 0; index < 5; index += 1) activate('.brand');
+  check('Five brand clicks enable slop mode across all labs', 'document.querySelector(".nav-list").textContent.includes("Slopinizer") && document.querySelector(".nav-list").textContent.includes("Slop Context") && document.querySelector(".nav-list").textContent.includes("Slop Flow") && document.querySelector(".nav-list").textContent.includes("Slop Constructor") && document.querySelector("h1").textContent.includes("premium slop")');
+  activate('.brand');
+  check('Rapid sixth brand click keeps slop mode active', 'document.querySelector(".nav-list").textContent.includes("Slopinizer") && document.querySelector("h1").textContent.includes("premium slop")');
   const errors = browser('errors');
   check('No uncaught browser errors', `${JSON.stringify(errors.trim())} === ''`);
   check('No external application resource requests', 'performance.getEntriesByType("resource").every(r => !/^https?:/.test(r.name) || new URL(r.name).origin===location.origin)');

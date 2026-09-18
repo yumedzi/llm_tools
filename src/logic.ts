@@ -123,8 +123,8 @@ export function conversationOutputTokens(random = Math.random): number {
   return 2000 + Math.floor(Math.max(0, Math.min(0.999999, random())) * 1001);
 }
 export const flowMcpTools = {
-  search: { schemaTokens: 2400, resultTokens: 2400 },
-  database: { schemaTokens: 4800, resultTokens: 4800 },
+  search: { schemaTokens: 2400, resultTokens: 1200 },
+  database: { schemaTokens: 4800, resultTokens: 2200 },
 } as const;
 export function flowUsed(entries: FlowEntry[]): number { return flowBase + entries.reduce((sum, e) => sum + e.tokens, 0); }
 export function retainCall(entries: FlowEntry[], entry: FlowEntry): FlowEntry[] | null {

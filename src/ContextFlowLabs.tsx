@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { CSSProperties, ReactNode } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -593,12 +594,100 @@ function flowEntryExplanation(entry: FlowEntry) {
       : "Current message: the latest conversation round, including the user's input and generated assistant output, retained for the next turn.";
 }
 
+function TimelineSectionTooltip({
+  label,
+  children,
+  className = "",
+  style,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 16, top: 16, above: false });
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const id = useId();
+  const isMeterSection = className.includes("meter-segment");
+  const updatePosition = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const above = rect.top >= 126;
+    const tooltipWidth = Math.min(isMeterSection ? 350 : 290, window.innerWidth - 32);
+    setPosition({
+      left: Math.min(Math.max(16, rect.left), window.innerWidth - tooltipWidth - 16),
+      top: above ? window.innerHeight - rect.top + 8 : rect.bottom + 8,
+      above,
+    });
+  };
+  const show = () => {
+    updatePosition();
+    setOpen(true);
+  };
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+  return (
+    <span
+      ref={triggerRef}
+      className={`timeline-section-trigger ${className}`}
+      style={style}
+      tabIndex={0}
+      aria-describedby={open ? id : undefined}
+      onMouseEnter={show}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={show}
+      onBlur={() => setOpen(false)}
+    >
+      {children}
+      {open &&
+        createPortal(
+          <span
+            id={id}
+            className={`timeline-section-tooltip ${isMeterSection ? "meter-section-tooltip" : ""}`}
+            role="tooltip"
+            style={position.above ? { left: position.left, bottom: position.top } : { left: position.left, top: position.top }}
+          >
+            {label}
+          </span>,
+          document.body,
+        )}
+    </span>
+  );
+}
+
 export function FlowLabView() {
   const [entries, setEntries] = usePersistentState<FlowEntry[]>(
     "context-lab:flow:v2",
     [],
     validEntries,
   );
+  useEffect(() => {
+    setEntries((current) => {
+      let changed = false;
+      const normalized = current.map((entry) => {
+        if (entry.kind !== "mcp-result" || !entry.toolId) return entry;
+        const legacyTokens =
+          entry.toolId === "search"
+            ? 2400
+            : entry.toolId === "database"
+              ? 4800
+              : null;
+        const resultTokens = flowMcpTools[entry.toolId as "search" | "database"]?.resultTokens;
+        if (legacyTokens !== entry.tokens || !resultTokens) return entry;
+        changed = true;
+        return { ...entry, tokens: resultTokens, originalTokens: resultTokens };
+      });
+      return changed ? normalized : current;
+    });
+  }, [setEntries]);
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState(
     "This session starts with system, deferred-MCP, and skill-header context.",
@@ -924,56 +1013,56 @@ export function FlowLabView() {
           aria-valuemax={flowCapacity}
           aria-valuenow={used}
         >
-          <HoverTooltip
+          <TimelineSectionTooltip
             className="meter-segment"
             style={{ width: `${(flowBase / flowCapacity) * 100}%` }}
             label="Boot context: the model's starting instructions, system tool definitions, deferred MCP catalog, and skill headers available before the first action."
           >
             <span style={{ background: "#6e7088" }} />
-          </HoverTooltip>
+          </TimelineSectionTooltip>
           {entries.flatMap((entry) => {
             const reasoningTokens = entry.reasoningTokens ?? 0;
             if (entry.kind === "message") {
               return [
-                <HoverTooltip
+                <TimelineSectionTooltip
                   key={`${entry.id}-input`}
                   className={`meter-segment input-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
                   style={{ width: `${((entry.inputTokens ?? 0) / flowCapacity) * 100}%` }}
                   label={`${entry.cached ? "Cached " : ""}input: ${formatNumber(entry.inputTokens ?? 0)} tokens supplied to this turn${entry.imageTokens ? `, including ${formatNumber(entry.imageTokens)} image visual tokens` : ""}.${entry.cached ? " This older conversation turn is resent as cached input." : ""}`}
                 >
                   <span />
-                </HoverTooltip>,
+                </TimelineSectionTooltip>,
                 ...(reasoningTokens
                   ? [
-                      <HoverTooltip
+                      <TimelineSectionTooltip
                         key={`${entry.id}-reasoning`}
                         className={`meter-segment reasoning-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
                         style={{ width: `${(reasoningTokens / flowCapacity) * 100}%` }}
                         label={`Thinking: ${formatNumber(reasoningTokens)} internal tokens generated before the visible answer. They are output-priced and retained as part of this conversation turn.`}
                       >
                         <span />
-                      </HoverTooltip>,
+                      </TimelineSectionTooltip>,
                     ]
                   : []),
-                <HoverTooltip
+                <TimelineSectionTooltip
                   key={`${entry.id}-output`}
                   className={`meter-segment output-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
                   style={{ width: `${((entry.outputTokens ?? 0) / flowCapacity) * 100}%` }}
                   label={`Output: ${formatNumber(entry.outputTokens ?? 0)} visible assistant-response tokens retained for later turns.`}
                 >
                   <span />
-                </HoverTooltip>,
+                </TimelineSectionTooltip>,
               ];
             }
             return [
-              <HoverTooltip
+              <TimelineSectionTooltip
                 key={entry.id}
                 className="meter-segment"
                 style={{ width: `${(entry.tokens / flowCapacity) * 100}%` }}
                 label={flowEntryExplanation(entry)}
               >
                 <span style={{ background: entryColor(entry) }} />
-              </HoverTooltip>,
+              </TimelineSectionTooltip>,
             ];
           })}
         </div>
@@ -1163,22 +1252,21 @@ export function FlowLabView() {
             </div>
           </div>
           <div className="flow-timeline" ref={timelineRef}>
-            <HoverTooltip
-              as="div"
-              className="timeline-entry baseline-entry"
-              label="Session boot context: content loaded before your first action. It provides the model's instructions, available system tools, deferred MCP catalog, and skill headers."
-            >
+            <div className="timeline-entry baseline-entry">
               <span className="timeline-dot" />
               <div>
-                <strong>Session boot context</strong>
+                <TimelineSectionTooltip
+                  label="Session boot context: content loaded before your first action. It provides the model's instructions, available system tools, deferred MCP catalog, and skill headers."
+                >
+                  <strong>Session boot context</strong>
+                </TimelineSectionTooltip>
                 <p>Claude Code observation plus explicit simulator estimates</p>
               </div>
               <span className="mono">{compact(flowBase)}</span>
-            </HoverTooltip>
+            </div>
             <div className="flow-boot-list">
               {flowBootEntries.map((entry) => (
-                <HoverTooltip
-                  as="div"
+                <TimelineSectionTooltip
                   key={entry.id}
                   className={`flow-boot-entry boot-${entry.kind}`}
                   label={
@@ -1194,7 +1282,7 @@ export function FlowLabView() {
                   <span>{entry.name}</span>
                   <small>{entry.detail}</small>
                   <strong>{compact(entry.tokens)}</strong>
-                </HoverTooltip>
+                </TimelineSectionTooltip>
               ))}
             </div>
             {entries.map((entry, index) => {
@@ -1209,12 +1297,10 @@ export function FlowLabView() {
                 ? requestCost(0, 0, entry.reasoningTokens, selectedModel.price, false)
                 : 0;
               return (
-                <HoverTooltip
-                as="div"
-                className={`timeline-entry ${entry.cached ? "cached-entry" : ""}`}
-                key={entry.id}
-                label={flowEntryExplanation(entry)}
-              >
+                <div
+                  className={`timeline-entry ${entry.cached ? "cached-entry" : ""}`}
+                  key={entry.id}
+                >
                 <span
                   className={`timeline-dot dot-${entry.kind}`}
                   style={{ background: entryColor(entry) }}
@@ -1228,34 +1314,56 @@ export function FlowLabView() {
                   </strong>
                   {entry.kind === "message" && !entry.summarized ? (
                     <div className="message-token-breakdown">
-                      <span className="message-input">
+                      <TimelineSectionTooltip
+                        className="message-input"
+                        label={`${entry.cached ? "Cached " : ""}input: ${formatNumber(entry.inputTokens ?? 0)} tokens supplied to this turn${entry.imageTokens ? `, including ${formatNumber(entry.imageTokens)} image visual tokens` : ""}.`}
+                      >
                         <small>{entry.cached ? "CACHED INPUT" : "INPUT"}</small>
                         <strong>{formatNumber(entry.inputTokens ?? 0)}</strong>
                         {entry.imageTokens && <em>{formatNumber(entry.imageTokens)} image</em>}
-                      </span>
-                      <span className="message-thinking">
+                      </TimelineSectionTooltip>
+                      <TimelineSectionTooltip
+                        className="message-thinking"
+                        label={`Thinking: ${formatNumber(entry.reasoningTokens ?? 0)} internal output tokens retained with this turn.`}
+                      >
                         <small>THINKING</small>
                         <strong>{formatNumber(entry.reasoningTokens ?? 0)}</strong>
                         <em>{entry.cached ? "cached turn" : "output-priced"}</em>
-                      </span>
-                      <span className="message-output">
+                      </TimelineSectionTooltip>
+                      <TimelineSectionTooltip
+                        className="message-output"
+                        label={`Output: ${formatNumber(entry.outputTokens ?? 0)} visible assistant-response tokens retained for later turns.`}
+                      >
                         <small>OUTPUT</small>
                         <strong>{formatNumber(entry.outputTokens ?? 0)}</strong>
                         <em>{entry.cached ? "cached turn" : "visible answer"}</em>
-                      </span>
+                      </TimelineSectionTooltip>
                     </div>
                   ) : (
-                    <p>
-                    {entry.summarized
-                      ? "Compacted summary - details removed"
-                      : entry.kind === "mcp-schema"
-                        ? "Full tool schema loaded once for this session"
-                        : entry.kind === "mcp-result"
-                          ? "Tool result retained after execution"
-                          : entry.kind === "skill-result"
-                            ? "Skill result retained; header was already present at boot"
-                            : "Retained context"}
-                    </p>
+                    <div className="entry-section-breakdown">
+                      <TimelineSectionTooltip
+                        className={`entry-section-block entry-${entry.kind}`}
+                        label={flowEntryExplanation(entry)}
+                      >
+                        <small>
+                          {entry.summarized
+                            ? "SUMMARY"
+                            : entry.kind === "mcp-schema"
+                              ? "MCP SCHEMA"
+                              : entry.kind === "mcp-result"
+                                ? "MCP RESULT"
+                                : "SKILL RESULT"}
+                        </small>
+                        <strong>{formatNumber(entry.tokens)}</strong>
+                        <em>
+                          {entry.summarized
+                            ? "details removed"
+                            : entry.cached
+                              ? "cached context"
+                              : "retained context"}
+                        </em>
+                      </TimelineSectionTooltip>
+                    </div>
                   )}
                   <span
                     className={`retained-tag ${entry.summarized ? "is-compacted" : entry.cached ? "is-cached" : ""}`}
@@ -1285,7 +1393,7 @@ export function FlowLabView() {
                   )}
                   <small className="entry-cost-total">${totalCost.toFixed(4)} total</small>
                 </span>
-              </HoverTooltip>
+              </div>
               );
             })}
             {pending && (
