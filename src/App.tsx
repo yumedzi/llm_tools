@@ -15,6 +15,7 @@ import {
   CircleDollarSign,
   Code2,
   Copy,
+  Cpu,
   Database,
   Download,
   Eraser,
@@ -31,6 +32,7 @@ import {
   LockKeyhole,
   MessageSquare,
   Minus,
+  Network,
   PanelLeftClose,
   Plus,
   Rocket,
@@ -52,6 +54,8 @@ import {
 import { ContextLabView, FlowLabView } from "./ContextFlowLabs";
 import { PricingSources, PricingTable } from "./PricingReference";
 import PromptLab from "./PromptLab";
+import AttentionLab from "./AttentionLab";
+import TransformerLab from "./TransformerLab";
 import {
   characterCount,
   compact,
@@ -113,6 +117,28 @@ const tabs = [
     accent: "#8baffb",
   },
   {
+    id: "transformer",
+    name: "Next token",
+    short: "Next token",
+    icon: Cpu,
+    title: "One token, many transformations.",
+    subtitle: "Trace a tiny decoder from input pieces to its next-token choice.",
+    label: "Walk through a transformer forward pass",
+    step: "04",
+    accent: "#edb18c",
+  },
+  {
+    id: "attention",
+    name: "Attention",
+    short: "Attention",
+    icon: Network,
+    title: "Context becomes a weighted conversation.",
+    subtitle: "Inspect which earlier tokens each position can use, and how strongly.",
+    label: "See contextual routing in action",
+    step: "05",
+    accent: "#72c7bd",
+  },
+  {
     id: "prompt",
     name: "Prompt sandbox",
     short: "Prompts",
@@ -120,7 +146,7 @@ const tabs = [
     title: "A better prompt starts here.",
     subtitle: "Build with intent. Compare iterations. Make every token count.",
     label: "Turn instructions into understanding",
-    step: "04",
+    step: "06",
     accent: "#f3ba94",
   },
 ] as const;
@@ -156,6 +182,20 @@ const slopLabCopy: Record<
     title: "Build boldly. Clarify never.",
     subtitle: "Assemble a prompt with maximum polish and a strategically flexible point.",
     label: "Engineer the perfect nothingburger",
+  },
+  transformer: {
+    name: "Slop Decoder",
+    short: "Decode",
+    title: "One token. Infinite alignment.",
+    subtitle: "Follow the vibes through each premium transformation.",
+    label: "Witness the synergy forward pass",
+  },
+  attention: {
+    name: "Slop Attention",
+    short: "Attention",
+    title: "Everything looks at everything. Sort of.",
+    subtitle: "Measure the relational resonance of every carefully aligned vibe.",
+    label: "Route the context strategically",
   },
 };
 const tabIsValid = (value: unknown): value is TabId =>
@@ -243,7 +283,7 @@ export default function App() {
           {slopMode ? "Vibes engineering workshop" : "LLM mechanics workshop"} <ChevronDown size={13} />
         </div>
         <div className="nav-eyebrow">
-          THE PLAYGROUND <span>04</span>
+          THE PLAYGROUND <span>06</span>
         </div>
         <nav className="nav-list">
           {displayedTabs.map((t) => (
@@ -279,7 +319,7 @@ export default function App() {
             ))}
           </div>
           <div className="lesson-count">
-            {visited.length} of 4 labs explored <ArrowUpRight size={13} />
+            {visited.length} of {tabs.length} labs explored <ArrowUpRight size={13} />
           </div>
         </div>
         <div className="sidebar-bottom">
@@ -392,6 +432,8 @@ export default function App() {
             {tab === "context" && <ContextLabView />}
             {tab === "flow" && <FlowLabView />}
             {tab === "prompt" && <PromptLab />}
+            {tab === "transformer" && <TransformerLab />}
+            {tab === "attention" && <AttentionLab />}
           </div>
           <footer className="page-footer">
             <span className="footer-curiosity">
@@ -906,7 +948,7 @@ function Guide({ onClose }: { onClose: () => void }) {
   }, []);
   function exportNotes() {
     const content =
-      "CONTEXT LAB — FACILITATOR FIELD GUIDE\n\n1. TOKENIZER\nCompare prose, code, and multilingual text. Observe that words are not tokens. All profiles and rates are illustrative, not verified model benchmarks or current prices.\n\n2. CONTEXT\nAdjust the shared context categories. Ask what happens when history grows and why generated output also needs space. The Memory files category includes conventions such as CLAUDE.md, AGENTS.md, and copilot-instructions.md. Capacity is model- and host-dependent.\n\n3. MCP & SKILLS\nRun Search documents twice, then a skill. Results accumulate. Compact the session and discuss lost detail. MCP itself does not mandate retention; this simulator retains data until compaction or reset.\n\n4. PROMPT SANDBOX\nLoad a template and capture a baseline. Add constraints or examples, then compare. More tokens do not necessarily mean a better prompt.\n\nPRIVACY\nAll processing is local to this browser. Experiment state is saved in localStorage when available. No real model requests, API keys, backend, analytics, or remote fonts. Clear this site’s browser storage to erase saved experiments.\n\nDEPLOY\nRun npm install, then npm run dev. For production run npm run build. Import the project into Vercel with the Vite preset; build command npm run build, output dist. No environment variables required.\n";
+      "CONTEXT LAB — FACILITATOR FIELD GUIDE\n\n1. TOKENIZER\nCompare prose, code, and multilingual text. Observe that words are not tokens. All profiles and rates are illustrative, not verified model benchmarks or current prices.\n\n2. CONTEXT\nAdjust the shared context categories. Ask what happens when history grows and why generated output also needs space. The Memory files category includes conventions such as CLAUDE.md, AGENTS.md, and copilot-instructions.md. Capacity is model- and host-dependent.\n\n3. MCP & SKILLS\nRun Search documents twice, then a skill. Results accumulate. Compact the session and discuss lost detail. MCP itself does not mandate retention; this simulator retains data until compaction or reset.\n\n4. NEXT TOKEN\nPlay the tiny decoder trace stage by stage. It uses real attention, softmax, and sampling operations over deliberate teaching tensors, not a production model trace.\n\n5. ATTENTION\nChoose a query row and inspect its causal mask. A high attention weight means a head routes more of one token's value; it is not a complete explanation of reasoning.\n\n6. PROMPT SANDBOX\nLoad a template and capture a baseline. Add constraints or examples, then compare. More tokens do not necessarily mean a better prompt.\n\nPRIVACY\nAll processing is local to this browser. Experiment state is saved in localStorage when available. No real model requests, API keys, backend, analytics, or remote fonts. Clear this site’s browser storage to erase saved experiments.\n\nDEPLOY\nRun npm install, then npm run dev. For production run npm run build. Import the project into Vercel with the Vite preset; build command npm run build, output dist. No environment variables required.\n";
     const url = URL.createObjectURL(
       new Blob([content], { type: "text/plain" }),
     );
@@ -940,7 +982,7 @@ function Guide({ onClose }: { onClose: () => void }) {
         More understanding.
       </h2>
       <p className="guide-intro">
-        Four small experiments to make large language models feel a little less
+        Six small experiments to make large language models feel a little less
         mysterious.
       </p>
       <div className="guide-lessons">
@@ -961,8 +1003,18 @@ function Guide({ onClose }: { onClose: () => void }) {
             text: "Call the same tool twice. Compact the session. What context remains, and what detail might be lost?",
           },
           {
+            icon: Cpu,
+            title: "04 / Follow one next-token choice",
+            text: "Walk through token embeddings, attention, logits, and sampling. Which stage changes a probability rather than choosing a token?",
+          },
+          {
+            icon: Network,
+            title: "05 / Inspect attention as a matrix",
+            text: "Select a query token and head. Where is the causal mask, and what does a high weight actually say?",
+          },
+          {
             icon: Braces,
-            title: "04 / Give instructions a structure",
+            title: "06 / Give instructions a structure",
             text: "Snapshot a template, add an example, and compare. Do the extra tokens make your intent clearer?",
           },
         ].map((x) => (

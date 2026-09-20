@@ -60,7 +60,7 @@ try {
   check('Memory files list common host conventions', 'document.querySelector(".allocation-list").textContent.includes("CLAUDE.md") && document.querySelector(".allocation-list").textContent.includes("AGENTS.md") && document.querySelector(".allocation-list").textContent.includes("copilot-instructions.md")');
   snapshot();
   browser('focus', 'input[aria-label="Conversation history tokens"]'); browser('press', 'ArrowRight');
-  check('Context slider increases conversation history', 'document.querySelector('input[aria-label="Conversation history tokens"]').value === "410"');
+  check('Context slider increases conversation history', 'document.querySelector("input[aria-label=\\"Conversation history tokens\\"]").value === "410"');
   button('Reset'); noOverflow('Desktop context');
   capture('desktop-context.png');
 
@@ -98,7 +98,7 @@ try {
   button('New session'); snapshot(); button('Clear');
   noOverflow('Desktop MCP lab');
 
-  nav('Prompt sandbox 04');
+  nav('Prompt sandbox 06');
   check('Starter prompt includes all five editable block types', 'document.querySelectorAll(".prompt-block").length===5 && document.querySelector(".prompt-code").textContent.includes("Source:")');
   button('Save snapshot');
   check('Before and after comparison starts at zero delta', 'document.querySelectorAll(".prompt-compare-pane").length===2 && document.querySelector(".prompt-comparison-summary .badge").textContent.includes("0 tokens")');
@@ -123,9 +123,28 @@ try {
   button('Copy prompt');
   check('Copy provides success or accessible fallback', 'document.querySelector(".prompt-feedback").textContent.length>0');
 
+  nav('Next token 04');
+  check('Inference lab renders a canvas pipeline and ranked candidates', '!!document.querySelector(".inference-canvas") && document.querySelectorAll(".candidate-list > div").length >= 1');
+  button('Play tour');
+  check('Inference tour can pause after playback begins', 'document.querySelector(".inference-play").textContent.includes("Pause")');
+  button('Pause tour');
+  browser('focus', '[aria-label="Sampling temperature"]'); browser('press', 'ArrowRight');
+  check('Sampling temperature is interactive', '+document.querySelector("[aria-label=\"Sampling temperature\"]").value > 0.8');
+  noOverflow('Desktop next-token');
+  capture('desktop-next-token.png');
+
+  nav('Attention 05');
+  check('Attention lab renders a causal matrix', 'document.querySelectorAll(".attention-cell").length > 0 && document.querySelectorAll(".attention-cell.masked").length > 0');
+  button('Scores');
+  check('Attention matrix switches between weights and scores', 'document.querySelector(".attention-cell:not(.masked)").textContent.includes(".")');
+  activate('.attention-query:last-of-type');
+  check('Attention query inspection updates', 'document.querySelector(".attention-inspector").textContent.includes("query")');
+  noOverflow('Desktop attention');
+  capture('desktop-attention.png');
+
   for (const width of [390, 320, 768]) {
     browser('set', 'viewport', String(width), '844');
-    for (const [name, mobile, id] of [['Tokenizer 01','Tokens','tokenizer'],['Context window 02','Context','context'],['Session Emulation 03','Tool flow','flow'],['Prompt sandbox 04','Prompts','prompt']]) {
+    for (const [name, mobile, id] of [['Tokenizer 01','Tokens','tokenizer'],['Context window 02','Context','context'],['Session Emulation 03','Tool flow','flow'],['Next token 04','Next token','transformer'],['Attention 05','Attention','attention'],['Prompt sandbox 06','Prompts','prompt']]) {
       nav(width <= 760 ? mobile : name);
       noOverflow(`${width}px ${id}`);
       check(`${width}px ${id}: heading visible`, '!!document.querySelector("h1") && document.querySelector("h1").getBoundingClientRect().width>0');
@@ -143,11 +162,11 @@ try {
   evaluate(`localStorage.setItem('context-lab:text','{broken');localStorage.setItem('context-lab:prompt:v1',JSON.stringify({blocks:[{}],snapshot:null}));location.reload()`);
   snapshot();
   check('Malformed persisted input recovers gracefully', 'document.querySelector("textarea").value.includes("thoughtful")');
-  nav('Prompt sandbox 04');
+  nav('Prompt sandbox 06');
   check('Invalid saved prompt recovers gracefully', 'document.querySelectorAll(".prompt-block").length===5');
   nav('Tokenizer 01');
   for (let index = 0; index < 5; index += 1) activate('.brand');
-  check('Five brand clicks enable slop mode across all labs', 'document.querySelector(".nav-list").textContent.includes("Slopinizer") && document.querySelector(".nav-list").textContent.includes("Slop Context") && document.querySelector(".nav-list").textContent.includes("Slop Flow") && document.querySelector(".nav-list").textContent.includes("Slop Constructor") && document.querySelector("h1").textContent.includes("premium slop")');
+  check('Five brand clicks enable slop mode across all labs', 'document.querySelector(".nav-list").textContent.includes("Slopinizer") && document.querySelector(".nav-list").textContent.includes("Slop Context") && document.querySelector(".nav-list").textContent.includes("Slop Flow") && document.querySelector(".nav-list").textContent.includes("Slop Constructor") && document.querySelector(".nav-list").textContent.includes("Slop Decoder") && document.querySelector(".nav-list").textContent.includes("Slop Attention") && document.querySelector("h1").textContent.includes("premium slop")');
   activate('.brand');
   check('Rapid sixth brand click keeps slop mode active', 'document.querySelector(".nav-list").textContent.includes("Slopinizer") && document.querySelector("h1").textContent.includes("premium slop")');
   const errors = browser('errors');

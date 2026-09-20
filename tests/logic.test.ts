@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { allocationTotal, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningMaxTokens, conversationReasoningMinTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelPriceOptions, models, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
 import { countClaudeTokens, countOpenAITokens, openAITokenIds, openAITokenPieces } from '../src/tokenizers.ts';
 import type { FlowEntry } from '../src/logic.ts';
+import { causalAttention, createTransformerTrace, decodeCandidates, seededSample, softmax } from '../src/transformerLogic.ts';
 const call = (tokens = 2400, id = 1): FlowEntry => ({ id, kind: 'mcp-result', name: 'Search', tokens, originalTokens: tokens, summarized: false, toolId: 'search' });
 
 describe('Token estimates and counters', () => {
@@ -73,6 +74,27 @@ describe('Token estimates and counters', () => {
     for (const text of [...Object.values(samples), ' abc\n🚀déjà\t你好! ', '']) {
       assert.equal(visualChunks(text).join(''), text);
     }
+  });
+});
+
+describe('Toy transformer teaching trace', () => {
+  it('uses a strict causal mask and normalizes every visible attention row', () => {
+    const cells = causalAttention([[3, 1, 2], [2, 4, 0], [1, 2, 5]]);
+    assert.deepEqual(cells[0].map(cell => cell.weight), [1, 0, 0]);
+    for (const row of cells) {
+      assert.ok(Math.abs(row.reduce((total, cell) => total + cell.weight, 0) - 1) < 1e-12);
+      row.forEach((cell, key) => { if (cell.masked) assert.equal(cell.weight, 0); });
+    }
+  });
+  it('keeps the shared inference trace and sampling deterministic', () => {
+    const trace = createTransformerTrace('capital');
+    assert.equal(trace.preset.expected, 'Paris');
+    assert.equal(trace.heads.length, 2);
+    assert.equal(trace.candidates.reduce((total, candidate) => total + candidate.probability, 0).toFixed(8), '1.00000000');
+    const topTwo = decodeCandidates(trace.candidates, 0.7, 2);
+    assert.equal(topTwo.length, 2);
+    assert.equal(seededSample(topTwo, 42).token, seededSample(topTwo, 42).token);
+    assert.deepEqual(softmax([0, 0]), [0.5, 0.5]);
   });
 });
 
