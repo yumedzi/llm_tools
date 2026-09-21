@@ -1004,7 +1004,7 @@ function Guide({ onClose }: { onClose: () => void }) {
         More understanding.
       </h2>
       <p className="guide-intro">
-        Six small experiments to make large language models feel a little less
+        Seven small experiments to make large language models feel a little less
         mysterious.
       </p>
       <div className="guide-lessons">
@@ -1026,17 +1026,22 @@ function Guide({ onClose }: { onClose: () => void }) {
           },
           {
             icon: Cpu,
-            title: "04 / Follow one next-token choice",
-            text: "Walk through token embeddings, attention, logits, and sampling. Which stage changes a probability rather than choosing a token?",
+            title: "04 / Watch a Transformer block change a vector",
+            text: "Click each card. Which steps borrow context, keep the old vector, or make a new update? Does this block create a word yet?",
+          },
+          {
+            icon: Cpu,
+            title: "05 / Follow one next-token choice",
+            text: "Walk from a final token vector to logits, probabilities, and a sampled next token. Which stage changes a probability rather than choosing a token?",
           },
           {
             icon: Network,
-            title: "05 / Inspect attention as a matrix",
+            title: "06 / Inspect attention as a matrix",
             text: "Select a query token and head. Where is the causal mask, and what does a high weight actually say?",
           },
           {
             icon: Braces,
-            title: "06 / Give instructions a structure",
+            title: "07 / Give instructions a structure",
             text: "Snapshot a template, add an example, and compare. Do the extra tokens make your intent clearer?",
           },
         ].map((x) => (

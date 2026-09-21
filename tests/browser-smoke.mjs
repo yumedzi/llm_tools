@@ -171,7 +171,7 @@ try {
     }
   }
   nav('Tokenizer 01'); button('Open field guide');
-  check('Field guide opens as accessible modal', 'document.querySelector("dialog").open');
+  check('Field guide opens with all seven labs', 'document.querySelector("dialog").open && document.querySelector("dialog").textContent.includes("04 / Watch a Transformer block change a vector") && document.querySelectorAll(".guide-lessons > div").length === 7');
   browser('press', 'Escape');
   check('Escape closes field guide', '!document.querySelector("dialog")');
   browser('set', 'viewport', '1440', '1080'); button('Present');
