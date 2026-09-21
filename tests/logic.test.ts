@@ -96,6 +96,29 @@ describe('Toy transformer teaching trace', () => {
     assert.equal(seededSample(topTwo, 42).token, seededSample(topTwo, 42).token);
     assert.deepEqual(softmax([0, 0]), [0.5, 0.5]);
   });
+  it('uses intentional attention relationships in the capital-city lesson', () => {
+    const cells = createTransformerTrace('capital').heads[0].cells;
+    const strongestKey = (query: number) => cells[query].reduce((best, cell, key) => cell.weight > cells[query][best].weight ? key : best, 0);
+    assert.equal(strongestKey(3), 1);
+    assert.equal(strongestKey(4), 3);
+    assert.ok(cells[4][1].weight > 0.3);
+    assert.ok(cells[4][3].weight > 0.3);
+  });
+  it('uses contrasting subject and nearby-noun heads in the agreement lesson', () => {
+    const heads = createTransformerTrace('agreement').heads;
+    assert.ok(heads[0].cells[5][1].weight > 0.6);
+    assert.ok(heads[1].cells[5][4].weight > 0.6);
+    assert.ok(heads[0].cells[5][1].weight > heads[0].cells[5][4].weight);
+    assert.ok(heads[1].cells[5][4].weight > heads[1].cells[5][1].weight);
+  });
+  it('keeps alternate antecedents visible in the coreference lesson', () => {
+    const heads = createTransformerTrace('coreference').heads;
+    assert.ok(heads[0].cells[3][2].weight > 0.5 && heads[0].cells[3][2].weight < 0.7);
+    assert.ok(heads[1].cells[3][0].weight > 0.5 && heads[1].cells[3][0].weight < 0.7);
+    assert.ok(heads[0].cells[4][3].weight > 0.4);
+    assert.ok(heads[1].cells[4][0].weight > 0.2);
+    assert.ok(heads[1].cells[4][3].weight > 0.2);
+  });
 });
 
 describe('Context allocations', () => {

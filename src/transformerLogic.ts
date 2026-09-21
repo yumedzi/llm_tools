@@ -76,6 +76,28 @@ function project(vector: number[], head: number, kind: "q" | "k" | "v"): number[
   const offsets = { q: [1.1, 0.8, -0.3, 0.4], k: [0.5, 1.2, 0.3, -0.6], v: [0.9, -0.2, 1.1, 0.35] }[kind];
   return vector.map((value, index) => value * offsets[(index + head) % offsets.length] + vector[(index + head + 1) % vector.length] * 0.25);
 }
+const teachingAttentionBoosts: Record<TransformerPresetId, Array<Record<string, number>>> = {
+  capital: [
+    { "3:1": 2.6, "3:2": 0.7, "4:3": 2.3, "4:1": 2.4 },
+    { "3:2": 1.2, "4:3": 1.8, "4:1": 0.8 },
+  ],
+  agreement: [
+    { "5:1": 3.0, "5:4": 0.8, "4:1": 1.5 },
+    { "5:4": 2.2, "5:1": 1.1, "4:3": 1.3 },
+  ],
+  coreference: [
+    { "3:2": 1.7, "4:3": 1.8, "4:2": 0.9 },
+    { "3:0": 1.8, "4:0": 1.4, "4:3": 1.1 },
+  ],
+};
+function teachingAttentionScores(id: TransformerPresetId, head: number, length: number): number[][] {
+  const boosts = teachingAttentionBoosts[id][head] ?? {};
+  return Array.from({ length }, (_, query) => Array.from({ length }, (_, key) => {
+    if (key > query) return -8;
+    const distance = query - key;
+    return (key === query ? 0.35 : -distance * 0.18) + (boosts[`${query}:${key}`] ?? 0);
+  }));
+}
 function logitsFor(preset: TransformerPreset, finalVector: number[]): number[] {
   const expectedIndex = preset.candidates.indexOf(preset.expected);
   return preset.candidates.map((_, index) => (index === expectedIndex ? 3.2 : 0.7 - index * 0.32) + dot(finalVector, [0.3, -0.15, 0.12, 0.08]) * (index === expectedIndex ? 0.24 : 0.05));
@@ -85,9 +107,7 @@ export function createTransformerTrace(id: TransformerPresetId): TransformerTrac
   const embeddings = preset.tokens.map((token, index) => vectorFor(token, index));
   const positioned = embeddings.map((vector, position) => vector.map((value, index) => value + Math.sin((position + 1) / Math.pow(10000, index / transformerDimensions.embedding)) * 0.22));
   const heads = Array.from({ length: transformerDimensions.heads }, (_, head) => {
-    const queries = positioned.map(vector => project(vector, head, "q"));
-    const keys = positioned.map(vector => project(vector, head, "k"));
-    const scores = queries.map(query => keys.map(key => dot(query, key) / Math.sqrt(transformerDimensions.embedding)));
+    const scores = teachingAttentionScores(preset.id, head, preset.tokens.length);
     return { name: `Head ${head + 1}`, cells: causalAttention(scores) };
   });
   const values = positioned.map(vector => project(vector, 0, "v"));
