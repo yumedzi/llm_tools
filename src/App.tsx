@@ -24,6 +24,7 @@ import {
   FileText,
   FlaskConical,
   Gauge,
+  GitBranch,
   Globe2,
   History,
   Info,
@@ -55,6 +56,7 @@ import { ContextLabView, FlowLabView } from "./ContextFlowLabs";
 import { PricingSources, PricingTable } from "./PricingReference";
 import PromptLab from "./PromptLab";
 import AttentionLab from "./AttentionLab";
+import TransformerBlockLab from "./TransformerBlockLab";
 import TransformerLab from "./TransformerLab";
 import {
   characterCount,
@@ -117,6 +119,17 @@ const tabs = [
     accent: "#8baffb",
   },
   {
+    id: "transformer-block",
+    name: "Transformer",
+    short: "Transformer",
+    icon: GitBranch,
+    title: "A block that reshapes context.",
+    subtitle: "Follow a tiny Transformer step by step, then compare two ways words can look around.",
+    label: "See the parts inside a Transformer",
+    step: "04",
+    accent: "#b19aff",
+  },
+  {
     id: "transformer",
     name: "Next token",
     short: "Next token",
@@ -124,7 +137,7 @@ const tabs = [
     title: "One token, many transformations.",
     subtitle: "Trace a tiny decoder from input pieces to its next-token choice.",
     label: "Walk through a transformer forward pass",
-    step: "04",
+    step: "05",
     accent: "#edb18c",
   },
   {
@@ -135,7 +148,7 @@ const tabs = [
     title: "Context becomes a weighted conversation.",
     subtitle: "Inspect which earlier tokens each position can use, and how strongly.",
     label: "See contextual routing in action",
-    step: "05",
+    step: "06",
     accent: "#72c7bd",
   },
   {
@@ -146,7 +159,7 @@ const tabs = [
     title: "A better prompt starts here.",
     subtitle: "Build with intent. Compare iterations. Make every token count.",
     label: "Turn instructions into understanding",
-    step: "06",
+    step: "07",
     accent: "#f3ba94",
   },
 ] as const;
@@ -175,6 +188,13 @@ const slopLabCopy: Record<
     title: "One tool call. Infinite synergy.",
     subtitle: "Trace the signals, retain the buzzwords, and let the context marinate.",
     label: "Follow the value-add journey",
+  },
+  "transformer-block": {
+    name: "Slop Transformer",
+    short: "Transform",
+    title: "One block. Unlimited transformation.",
+    subtitle: "Watch the premium vectors become even more strategically vector-shaped.",
+    label: "Follow the values through the vibes",
   },
   prompt: {
     name: "Slop Constructor",
@@ -283,7 +303,7 @@ export default function App() {
           {slopMode ? "Vibes engineering workshop" : "LLM mechanics workshop"} <ChevronDown size={13} />
         </div>
         <div className="nav-eyebrow">
-          THE PLAYGROUND <span>06</span>
+          THE PLAYGROUND <span>07</span>
         </div>
         <nav className="nav-list">
           {displayedTabs.map((t) => (
@@ -432,6 +452,7 @@ export default function App() {
             {tab === "context" && <ContextLabView />}
             {tab === "flow" && <FlowLabView />}
             {tab === "prompt" && <PromptLab />}
+            {tab === "transformer-block" && <TransformerBlockLab />}
             {tab === "transformer" && <TransformerLab />}
             {tab === "attention" && <AttentionLab />}
           </div>

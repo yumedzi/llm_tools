@@ -24,7 +24,7 @@ const stageHelp = [
 ] as const;
 type LabState = { preset: TransformerPresetId; temperature: number; topK: number; seed: number };
 const initial: LabState = { preset: "capital", temperature: 0.8, topK: 3, seed: 42 };
-const validState = (value: unknown): value is LabState => typeof value === "object" && value !== null && ["capital", "agreement", "coreference"].includes((value as LabState).preset) && Number.isFinite((value as LabState).temperature) && Number.isFinite((value as LabState).topK) && Number.isFinite((value as LabState).seed);
+const validState = (value: unknown): value is LabState => typeof value === "object" && value !== null && ["capital", "agreement", "coreference", "three-relations"].includes((value as LabState).preset) && Number.isFinite((value as LabState).temperature) && Number.isFinite((value as LabState).topK) && Number.isFinite((value as LabState).seed);
 
 function InferenceCanvas({ stage, tokens, candidates }: { stage: number; tokens: string[]; candidates: Candidate[] }) {
   const canvas = useRef<HTMLCanvasElement>(null);

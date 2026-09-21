@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from 'react';
 import { CircleHelp, Info } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -19,10 +20,26 @@ export function TooltipNote({ children }: { children: ReactNode }) { return <div
 
 export function InfoTooltip({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ x: 0, y: 0, above: false });
   const id = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const rect = trigger.current?.getBoundingClientRect();
+      if (!rect) return;
+      const x = Math.min(Math.max(rect.left + rect.width / 2, 152), window.innerWidth - 152);
+      const above = rect.bottom + 190 > window.innerHeight && rect.top > 190;
+      setPosition({ x, y: above ? rect.top - 8 : rect.bottom + 8, above });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open]);
   return <span className="info-tooltip" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>
-    <button type="button" className="info-tooltip-trigger" aria-label={label} aria-describedby={open ? id : undefined} aria-expanded={open} onClick={() => setOpen(true)} onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}><CircleHelp size={14} aria-hidden="true" /></button>
-    {open && <span id={id} className="info-tooltip-content" role="tooltip">{children}</span>}
+    <button ref={trigger} type="button" className="info-tooltip-trigger" aria-label={label} aria-describedby={open ? id : undefined} aria-expanded={open} onClick={() => setOpen(value => !value)} onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}><CircleHelp size={14} aria-hidden="true" /></button>
+    {open && createPortal(<span id={id} className={`info-tooltip-content floating-tooltip ${position.above ? 'above' : ''}`} role="tooltip" style={{ '--tooltip-x': `${position.x}px`, '--tooltip-y': `${position.y}px` } as CSSProperties}>{children}</span>, document.body)}
   </span>;
 }
 

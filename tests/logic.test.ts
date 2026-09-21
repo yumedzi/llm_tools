@@ -4,6 +4,7 @@ import { allocationTotal, characterCount, compactEntries, compareModelTokens, co
 import { countClaudeTokens, countOpenAITokens, openAITokenIds, openAITokenPieces } from '../src/tokenizers.ts';
 import type { FlowEntry } from '../src/logic.ts';
 import { causalAttention, createTransformerTrace, decodeCandidates, seededSample, softmax } from '../src/transformerLogic.ts';
+import { createTransformerBlockTrace } from '../src/transformerBlockLogic.ts';
 const call = (tokens = 2400, id = 1): FlowEntry => ({ id, kind: 'mcp-result', name: 'Search', tokens, originalTokens: tokens, summarized: false, toolId: 'search' });
 
 describe('Token estimates and counters', () => {
@@ -118,6 +119,41 @@ describe('Toy transformer teaching trace', () => {
     assert.ok(heads[0].cells[4][3].weight > 0.4);
     assert.ok(heads[1].cells[4][0].weight > 0.2);
     assert.ok(heads[1].cells[4][3].weight > 0.2);
+  });
+  it('uses three complementary heads in the three-relationships lesson', () => {
+    const heads = createTransformerTrace('three-relations').heads;
+    assert.equal(heads.length, 3);
+    assert.ok(heads[0].cells[8][1].weight > 0.4);
+    assert.ok(heads[1].cells[8][4].weight > 0.4);
+    assert.ok(heads[2].cells[8][7].weight > 0.4);
+  });
+});
+
+describe('Transformer block teaching trace', () => {
+  it('keeps decoder-only attention causal and normalized', () => {
+    const trace = createTransformerBlockTrace('decoder');
+    trace.attention.forEach((row, query) => {
+      assert.equal(row.reduce((total, cell) => total + cell.weight, 0).toFixed(8), '1.00000000');
+      row.forEach((cell, key) => {
+        if (key > query) assert.deepEqual(cell, { masked: true, weight: 0 });
+      });
+    });
+  });
+  it('lets encoder attention see both directions', () => {
+    const row = createTransformerBlockTrace('encoder').attention[1];
+    assert.equal(row.some((cell, key) => key > 1 && !cell.masked && cell.weight > 0), true);
+  });
+  it('adds branch outputs back to the residual stream', () => {
+    const trace = createTransformerBlockTrace('decoder');
+    trace.output.forEach((vector, token) => vector.forEach((value, dimension) => {
+      assert.ok(Math.abs(value - (trace.firstResidual[token][dimension] + trace.mlpOutput[token][dimension])) < 1e-12);
+    }));
+  });
+  it('expands then projects the MLP dimensions', () => {
+    const trace = createTransformerBlockTrace('encoder');
+    assert.equal(trace.input[0].length, 4);
+    assert.equal(trace.mlpExpanded[0].length, 8);
+    assert.equal(trace.mlpOutput[0].length, 4);
   });
 });
 

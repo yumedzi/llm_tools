@@ -98,7 +98,7 @@ try {
   button('New session'); snapshot(); button('Clear');
   noOverflow('Desktop MCP lab');
 
-  nav('Prompt sandbox 06');
+  nav('Prompt sandbox 07');
   check('Starter prompt includes all five editable block types', 'document.querySelectorAll(".prompt-block").length===5 && document.querySelector(".prompt-code").textContent.includes("Source:")');
   button('Save snapshot');
   check('Before and after comparison starts at zero delta', 'document.querySelectorAll(".prompt-compare-pane").length===2 && document.querySelector(".prompt-comparison-summary .badge").textContent.includes("0 tokens")');
@@ -123,7 +123,26 @@ try {
   button('Copy prompt');
   check('Copy provides success or accessible fallback', 'document.querySelector(".prompt-feedback").textContent.length>0');
 
-  nav('Next token 04');
+  nav('Transformer 04');
+  check('Transformer block starts with an animated teaching diagram', '!!document.querySelector(".transformer-block-stage") && !!document.querySelector(".block-live-view") && document.querySelectorAll(".block-module").length === 7');
+  activate('.transformer-diagram [role="button"]:nth-of-type(7)');
+  check('Transformer pipeline cards jump to their teaching step', 'document.querySelector(".block-stage-copy").textContent.includes("Try a new pattern") && document.querySelector(".mlp-data").textContent.includes("8 hidden values")');
+  check('Transformer deep dive starts collapsed', '!document.querySelector(".transformer-deep-dive").open');
+  button('Encoder');
+  check('Encoder permits future-word context', 'document.querySelector(".block-inspector").textContent.includes("BOTH SIDES") && !document.querySelectorAll(".block-links .masked").length');
+  button('Decoder-only');
+  check('Decoder-only blocks future-word context', 'document.querySelector(".block-inspector").textContent.includes("EARLIER ONLY") && document.querySelectorAll(".block-links .masked").length > 0');
+  button('night');
+  check('Transformer token inspection updates', 'document.querySelector(".block-inspector").textContent.includes("What night may borrow")');
+  button('Play tour');
+  check('Transformer tour can pause after playback begins', 'document.querySelector(".transformer-block-stage .inference-play").textContent.includes("Pause")');
+  button('Pause tour');
+  activate('.transformer-deep-dive summary');
+  check('Transformer deep dive opens on request', 'document.querySelector(".transformer-deep-dive").open');
+  noOverflow('Desktop Transformer block');
+  capture('desktop-transformer-block.png');
+
+  nav('Next token 05');
   check('Inference lab renders a canvas pipeline and ranked candidates', '!!document.querySelector(".inference-canvas") && document.querySelectorAll(".candidate-list > div").length >= 1');
   button('Play tour');
   check('Inference tour can pause after playback begins', 'document.querySelector(".inference-play").textContent.includes("Pause")');
@@ -133,7 +152,7 @@ try {
   noOverflow('Desktop next-token');
   capture('desktop-next-token.png');
 
-  nav('Attention 05');
+  nav('Attention 06');
   check('Attention lab renders a causal matrix', 'document.querySelectorAll(".attention-cell").length > 0 && document.querySelectorAll(".attention-cell.masked").length > 0');
   button('Scores');
   check('Attention matrix switches between weights and scores', 'document.querySelector(".attention-cell:not(.masked)").textContent.includes(".")');
@@ -144,7 +163,7 @@ try {
 
   for (const width of [390, 320, 768]) {
     browser('set', 'viewport', String(width), '844');
-    for (const [name, mobile, id] of [['Tokenizer 01','Tokens','tokenizer'],['Context window 02','Context','context'],['Session Emulation 03','Tool flow','flow'],['Next token 04','Next token','transformer'],['Attention 05','Attention','attention'],['Prompt sandbox 06','Prompts','prompt']]) {
+    for (const [name, mobile, id] of [['Tokenizer 01','Tokens','tokenizer'],['Context window 02','Context','context'],['Session Emulation 03','Tool flow','flow'],['Transformer 04','Transformer','transformer-block'],['Next token 05','Next token','transformer'],['Attention 06','Attention','attention'],['Prompt sandbox 07','Prompts','prompt']]) {
       nav(width <= 760 ? mobile : name);
       noOverflow(`${width}px ${id}`);
       check(`${width}px ${id}: heading visible`, '!!document.querySelector("h1") && document.querySelector("h1").getBoundingClientRect().width>0');
@@ -162,11 +181,11 @@ try {
   evaluate(`localStorage.setItem('context-lab:text','{broken');localStorage.setItem('context-lab:prompt:v1',JSON.stringify({blocks:[{}],snapshot:null}));location.reload()`);
   snapshot();
   check('Malformed persisted input recovers gracefully', 'document.querySelector("textarea").value.includes("thoughtful")');
-  nav('Prompt sandbox 06');
+  nav('Prompt sandbox 07');
   check('Invalid saved prompt recovers gracefully', 'document.querySelectorAll(".prompt-block").length===5');
   nav('Tokenizer 01');
   for (let index = 0; index < 5; index += 1) activate('.brand');
-  check('Five brand clicks enable slop mode across all labs', 'document.querySelector(".nav-list").textContent.includes("Slopinizer") && document.querySelector(".nav-list").textContent.includes("Slop Context") && document.querySelector(".nav-list").textContent.includes("Slop Flow") && document.querySelector(".nav-list").textContent.includes("Slop Constructor") && document.querySelector(".nav-list").textContent.includes("Slop Decoder") && document.querySelector(".nav-list").textContent.includes("Slop Attention") && document.querySelector("h1").textContent.includes("premium slop")');
+  check('Five brand clicks enable slop mode across all labs', 'document.querySelector(".nav-list").textContent.includes("Slopinizer") && document.querySelector(".nav-list").textContent.includes("Slop Context") && document.querySelector(".nav-list").textContent.includes("Slop Flow") && document.querySelector(".nav-list").textContent.includes("Slop Transformer") && document.querySelector(".nav-list").textContent.includes("Slop Constructor") && document.querySelector(".nav-list").textContent.includes("Slop Decoder") && document.querySelector(".nav-list").textContent.includes("Slop Attention") && document.querySelector("h1").textContent.includes("premium slop")');
   activate('.brand');
   check('Rapid sixth brand click keeps slop mode active', 'document.querySelector(".nav-list").textContent.includes("Slopinizer") && document.querySelector("h1").textContent.includes("premium slop")');
   const errors = browser('errors');

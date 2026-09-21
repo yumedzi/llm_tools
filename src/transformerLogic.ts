@@ -1,4 +1,4 @@
-export type TransformerPresetId = "capital" | "agreement" | "coreference";
+export type TransformerPresetId = "capital" | "agreement" | "coreference" | "three-relations";
 export type TransformerPreset = {
   id: TransformerPresetId;
   label: string;
@@ -33,9 +33,17 @@ export const transformerPresets: TransformerPreset[] = [
     expected: "because",
     note: "Different heads can keep distinct possible links between names and pronouns.",
   },
+  {
+    id: "three-relations",
+    label: "Three relationships",
+    tokens: ["The", "keys", "to", "the", "cabinet", "in", "the", "drawer", "are"],
+    candidates: ["missing", "heavy", "cabinet", "drawers", "is"],
+    expected: "missing",
+    note: "Three heads can preserve the plural subject, the cabinet relationship, and the drawer location at once.",
+  },
 ];
 
-export const transformerDimensions = { embedding: 4, heads: 2, layers: 2 } as const;
+export const transformerDimensions = { embedding: 4, layers: 2 } as const;
 export type AttentionCell = { score: number; weight: number; masked: boolean };
 export type AttentionHead = { name: string; cells: AttentionCell[][] };
 export type Candidate = { token: string; logit: number; probability: number };
@@ -89,6 +97,11 @@ const teachingAttentionBoosts: Record<TransformerPresetId, Array<Record<string, 
     { "3:2": 1.7, "4:3": 1.8, "4:2": 0.9 },
     { "3:0": 1.8, "4:0": 1.4, "4:3": 1.1 },
   ],
+  "three-relations": [
+    { "8:1": 2.7, "8:4": 0.6, "8:7": 0.6 },
+    { "8:4": 2.6, "8:1": 0.4, "8:7": 0.7 },
+    { "8:7": 2.5, "8:4": 0.6, "8:1": 0.4 },
+  ],
 };
 function teachingAttentionScores(id: TransformerPresetId, head: number, length: number): number[][] {
   const boosts = teachingAttentionBoosts[id][head] ?? {};
@@ -106,7 +119,7 @@ export function createTransformerTrace(id: TransformerPresetId): TransformerTrac
   const preset = transformerPresets.find(item => item.id === id) ?? transformerPresets[0];
   const embeddings = preset.tokens.map((token, index) => vectorFor(token, index));
   const positioned = embeddings.map((vector, position) => vector.map((value, index) => value + Math.sin((position + 1) / Math.pow(10000, index / transformerDimensions.embedding)) * 0.22));
-  const heads = Array.from({ length: transformerDimensions.heads }, (_, head) => {
+  const heads = teachingAttentionBoosts[preset.id].map((_, head) => {
     const scores = teachingAttentionScores(preset.id, head, preset.tokens.length);
     return { name: `Head ${head + 1}`, cells: causalAttention(scores) };
   });
