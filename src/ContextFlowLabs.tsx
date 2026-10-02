@@ -10,6 +10,7 @@ import {
   Database,
   Eraser,
   Expand,
+  FastForward,
   FileCode2,
   FileText,
   Gauge,
@@ -43,10 +44,13 @@ import {
   conversationOutputTokens,
   conversationReasoningMaxTokens,
   conversationReasoningTokens,
+  emulateLongConversation,
+  emulatedConversationTurns,
   fitAllocations,
   flowBase,
   flowBootEntries,
-  flowCapacity,
+  flowCapacityOptions,
+  flowMaxCapacity,
   flowMcpTools,
   flowUsed,
   formatNumber,
@@ -56,11 +60,13 @@ import {
   retainConversation,
   requestCost,
   reservedContextBuffer,
+  sessionSpend,
 } from "./logic";
 import type {
   ContextAllocationKey,
   ContextAllocations,
   ContextCapacity,
+  FlowCapacity,
   FlowEntry,
 } from "./logic";
 import {
@@ -539,7 +545,7 @@ const callTypes = [
 ];
 const validEntries = (value: unknown): value is FlowEntry[] =>
   Array.isArray(value) &&
-  value.length <= 200 &&
+  value.length <= 1000 &&
   value.every(
     (entry) =>
       entry &&
@@ -559,7 +565,10 @@ const validEntries = (value: unknown): value is FlowEntry[] =>
           (entry as FlowEntry).reasoningTokens! <= (entry as FlowEntry).tokens)) &&
       typeof (entry as FlowEntry).summarized === "boolean",
   ) &&
-  flowUsed(value as FlowEntry[]) <= flowCapacity;
+  flowUsed(value as FlowEntry[]) <= flowMaxCapacity;
+const isFlowCapacity = (value: unknown): value is FlowCapacity =>
+  typeof value === "number" &&
+  flowCapacityOptions.includes(value as FlowCapacity);
 const entryColor = (entry: FlowEntry): string =>
   entry.cached
     ? "#63748f"
@@ -688,6 +697,11 @@ export function FlowLabView() {
       return changed ? normalized : current;
     });
   }, [setEntries]);
+  const [capacity, setCapacity] = usePersistentState<FlowCapacity>(
+    "context-lab:flow-capacity:v1",
+    64000,
+    isFlowCapacity,
+  );
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState(
     "This session starts with system, deferred-MCP, and skill-header context.",
@@ -744,7 +758,7 @@ export function FlowLabView() {
     timeline?.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
   }, [autoScroll, entries.length]);
   const used = flowUsed(entries);
-  const percent = (used / flowCapacity) * 100;
+  const percent = (used / capacity) * 100;
   const mcp = entries
     .filter(
       (entry) => entry.kind === "mcp-schema" || entry.kind === "mcp-result",
@@ -783,6 +797,39 @@ export function FlowLabView() {
       useCachedInputRate,
     );
   const estimatedNextRequestCost = nextRequestCost(used);
+  const spend = sessionSpend(entries, nextRequestCost);
+  useEffect(() => {
+    if (used > capacity) setCapacity(flowMaxCapacity);
+  }, [used, capacity, setCapacity]);
+  // Rough per-turn growth used for the button estimate; the real run is randomized.
+  const emulationEstimate =
+    emulatedConversationTurns *
+      (conversationInputTokens + 2500 + (simulateReasoning ? 1200 : 0)) +
+    (emulatedConversationTurns / 5) * 1700 +
+    (emulatedConversationTurns / 10) * 1350;
+  function emulate() {
+    if (pending) return;
+    setPending("emulate");
+    setNotice(`Fast-forwarding ${emulatedConversationTurns} turns...`);
+    timer.current = setTimeout(() => {
+      const before = used;
+      const firstRequest = nextRequestCost(flowBase);
+      const result = emulateLongConversation(entries, {
+        capacity,
+        reasoning: simulateReasoning,
+      });
+      setEntries(result.entries);
+      setPending(null);
+      setShowRequestCost(true);
+      const after = flowUsed(result.entries);
+      const total = sessionSpend(result.entries, nextRequestCost).total;
+      setNotice(
+        result.turns === 0
+          ? "Not enough context for another emulated turn. Compact or start a fresh session."
+          : `Emulated ${result.turns} turns${result.turns < emulatedConversationTurns ? " (context full)" : ""}: context ${compact(before)} -> ${compact(after)}. Next request $${nextRequestCost(after).toFixed(4)} vs $${firstRequest.toFixed(4)} on a fresh session; session spend $${total.toFixed(2)}.`,
+      );
+    }, 700);
+  }
   function addedTokens(
     call: (typeof callTypes)[number],
     assistantOutputTokens?: number,
@@ -804,7 +851,7 @@ export function FlowLabView() {
         ? conversationReasoningTokens()
         : 0;
     const incoming = addedTokens(call, assistantOutputTokens);
-    if (used + incoming > flowCapacity) {
+    if (used + incoming > capacity) {
       setNotice(
         "Not enough context. Compact retained results or start a fresh session.",
       );
@@ -830,7 +877,7 @@ export function FlowLabView() {
             summarized: false,
             toolId: call.id,
           };
-          next = retainCall(next, schema) ?? next;
+          next = retainCall(next, schema, capacity) ?? next;
         }
         const result: FlowEntry = {
           id: timestamp + 1,
@@ -857,8 +904,8 @@ export function FlowLabView() {
           reasoningTokens: reasoningTokens || undefined,
         };
         return call.kind === "message"
-          ? (retainConversation(next, result) ?? next)
-          : (retainCall(next, result) ?? next);
+          ? (retainConversation(next, result, capacity) ?? next)
+          : (retainCall(next, result, capacity) ?? next);
       });
       setPending(null);
       setNotice(
@@ -880,10 +927,38 @@ export function FlowLabView() {
       <section className="panel flow-meter-panel">
         <div className="flow-meter-heading">
           <div>
-            <span className="eyebrow">SESSION CONTEXT</span>
+            <span className="eyebrow">
+              SESSION CONTEXT
+              <span
+                className="segmented flow-capacity-switch"
+                role="group"
+                aria-label="Session context window"
+              >
+                {flowCapacityOptions.map((option) => {
+                  const blocked = option < used;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`btn ${capacity === option ? "active" : ""}`}
+                      aria-pressed={capacity === option}
+                      disabled={!!pending || blocked}
+                      title={
+                        blocked
+                          ? "Retained context exceeds this window. Compact or start a new session first."
+                          : `Simulate a ${compact(option)}-token context window`
+                      }
+                      onClick={() => setCapacity(option)}
+                    >
+                      {option >= 1000000 ? "1M" : compact(option).toUpperCase()}
+                    </button>
+                  );
+                })}
+              </span>
+            </span>
             <h2>
               {formatNumber(used)}{" "}
-              <span>/ {formatNumber(flowCapacity)} tokens</span>
+              <span>/ {formatNumber(capacity)} tokens</span>
             </h2>
           </div>
           <div className={`meter-percentage ${percent > 85 ? "warning" : ""}`}>
@@ -923,12 +998,22 @@ export function FlowLabView() {
               Price request
             </button>
             {showRequestCost && (
-              <strong
-                className="flow-price-preview"
-                style={{ color: selectedModel.color }}
-              >
-                ${estimatedNextRequestCost.toFixed(4)}
-              </strong>
+              <>
+                <strong
+                  className="flow-price-preview"
+                  style={{ color: selectedModel.color }}
+                  title="Next request: the whole retained context is sent again"
+                >
+                  ${estimatedNextRequestCost.toFixed(4)}
+                </strong>
+                <span
+                  className="flow-session-spend"
+                  title="Sum of every simulated request so far. Each request resent all context retained before it, so spend grows faster than the context."
+                >
+                  Session spend <strong>${spend.total.toFixed(2)}</strong>
+                  <small>{spend.requests} requests</small>
+                </span>
+              </>
             )}
             <IconButton
               icon={SlidersHorizontal}
@@ -1010,12 +1095,12 @@ export function FlowLabView() {
           role="meter"
           aria-label="Session context used"
           aria-valuemin={0}
-          aria-valuemax={flowCapacity}
+          aria-valuemax={capacity}
           aria-valuenow={used}
         >
           <TimelineSectionTooltip
             className="meter-segment"
-            style={{ width: `${(flowBase / flowCapacity) * 100}%` }}
+            style={{ width: `${(flowBase / capacity) * 100}%` }}
             label="Boot context: the model's starting instructions, system tool definitions, deferred MCP catalog, and skill headers available before the first action."
           >
             <span style={{ background: "#6e7088" }} />
@@ -1027,7 +1112,7 @@ export function FlowLabView() {
                 <TimelineSectionTooltip
                   key={`${entry.id}-input`}
                   className={`meter-segment input-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
-                  style={{ width: `${((entry.inputTokens ?? 0) / flowCapacity) * 100}%` }}
+                  style={{ width: `${((entry.inputTokens ?? 0) / capacity) * 100}%` }}
                   label={`${entry.cached ? "Cached " : ""}input: ${formatNumber(entry.inputTokens ?? 0)} tokens supplied to this turn${entry.imageTokens ? `, including ${formatNumber(entry.imageTokens)} image visual tokens` : ""}.${entry.cached ? " This older conversation turn is resent as cached input." : ""}`}
                 >
                   <span />
@@ -1037,7 +1122,7 @@ export function FlowLabView() {
                       <TimelineSectionTooltip
                         key={`${entry.id}-reasoning`}
                         className={`meter-segment reasoning-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
-                        style={{ width: `${(reasoningTokens / flowCapacity) * 100}%` }}
+                        style={{ width: `${(reasoningTokens / capacity) * 100}%` }}
                         label={`Thinking: ${formatNumber(reasoningTokens)} internal tokens generated before the visible answer. They are output-priced and retained as part of this conversation turn.`}
                       >
                         <span />
@@ -1047,7 +1132,7 @@ export function FlowLabView() {
                 <TimelineSectionTooltip
                   key={`${entry.id}-output`}
                   className={`meter-segment output-meter-segment ${entry.cached ? "cached-meter-segment" : ""}`}
-                  style={{ width: `${((entry.outputTokens ?? 0) / flowCapacity) * 100}%` }}
+                  style={{ width: `${((entry.outputTokens ?? 0) / capacity) * 100}%` }}
                   label={`Output: ${formatNumber(entry.outputTokens ?? 0)} visible assistant-response tokens retained for later turns.`}
                 >
                   <span />
@@ -1058,7 +1143,7 @@ export function FlowLabView() {
               <TimelineSectionTooltip
                 key={entry.id}
                 className="meter-segment"
-                style={{ width: `${(entry.tokens / flowCapacity) * 100}%` }}
+                style={{ width: `${(entry.tokens / capacity) * 100}%` }}
                 label={flowEntryExplanation(entry)}
               >
                 <span style={{ background: entryColor(entry) }} />
@@ -1098,7 +1183,7 @@ export function FlowLabView() {
               <i className="cached-legend" /> Cached context {compact(cachedContextTokens)}
             </span>
           )}
-          <strong>{formatNumber(flowCapacity - used)} free</strong>
+          <strong>{formatNumber(capacity - used)} free</strong>
         </div>
       </section>
       <div className="flow-layout">
@@ -1139,7 +1224,7 @@ export function FlowLabView() {
                   <button
                     type="button"
                     className={`call-button ${pending === call.id ? "pending" : ""}`}
-                    disabled={!!pending || used + incoming > flowCapacity}
+                    disabled={!!pending || used + incoming > capacity}
                     onClick={() => trigger(call)}
                     title={
                       call.kind === "mcp"
@@ -1168,6 +1253,27 @@ export function FlowLabView() {
                 </div>
               );
             })}
+            {capacity === flowMaxCapacity && (
+              <button
+                type="button"
+                className={`call-button emulate-button ${pending === "emulate" ? "pending" : ""}`}
+                disabled={!!pending || used + conversationInputTokens + 3000 > capacity}
+                onClick={emulate}
+                title="Fast-forward a long session to see how request cost grows when every turn resends the retained context."
+              >
+                <span className="call-icon">
+                  <FastForward size={20} />
+                </span>
+                <span>
+                  <strong>Emulate long conversation</strong>
+                  <small>+{emulatedConversationTurns} mixed turns: messages, tool calls, skills</small>
+                </span>
+                <span className="call-token">
+                  ~+{compact(Math.round(emulationEstimate / 1000) * 1000)}
+                  <ArrowUpRight size={14} />
+                </span>
+              </button>
+            )}
           </div>
           <div className="flow-actions">
             <IconButton
@@ -1180,7 +1286,7 @@ export function FlowLabView() {
                 const next = compactEntries(entries);
                 setEntries(next);
                 setNotice(
-                  `Compacted retained entries: ${formatNumber(used - flowUsed(next))} tokens freed. Summaries keep only 25% of their original size.`,
+                  `Compacted retained entries: ${formatNumber(used - flowUsed(next))} tokens freed. Summaries keep only 25% of their original size; session spend restarts from the summary.`,
                 );
               }}
             >

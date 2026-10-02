@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { allocationTotal, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningMaxTokens, conversationReasoningMinTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelPriceOptions, models, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
+import { allocationTotal, emulateLongConversation, flowMaxCapacity, sessionSpend, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningMaxTokens, conversationReasoningMinTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelPriceOptions, models, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
 import { countClaudeTokens, countOpenAITokens, openAITokenIds, openAITokenPieces } from '../src/tokenizers.ts';
 import type { FlowEntry } from '../src/logic.ts';
 import { causalAttention, createTransformerTrace, decodeCandidates, seededSample, softmax } from '../src/transformerLogic.ts';
@@ -244,5 +244,45 @@ describe('Retained tool and skill context', () => {
       ['mcp-schema', true], ['mcp-result', true], ['message', false],
     ]);
     assert.equal(flowUsed(conversation), flowBase + 5400);
+  });
+  it('accepts a 1M window where the 64K default rejects', () => {
+    const big = call(100000);
+    assert.equal(retainCall([], big), null);
+    assert.equal(flowUsed(retainCall([], big, flowMaxCapacity)!), flowBase + 100000);
+  });
+});
+
+describe('long conversation emulation', () => {
+  const seeded = () => { let x = 0.42; return () => (x = (x * 9301 + 49297) % 233280 / 233280); };
+  it('adds 50 rounds with tool calls, skills, and one schema per tool', () => {
+    const { entries, turns } = emulateLongConversation([], { random: seeded(), startId: 1 });
+    assert.equal(turns, 50);
+    const rounds = entries.filter(e => e.kind === 'message').map(e => e.round);
+    assert.deepEqual(rounds, Array.from({ length: 50 }, (_, i) => i + 1));
+    assert.equal(entries.filter(e => e.kind === 'mcp-schema').length, 2);
+    assert.equal(entries.filter(e => e.kind === 'mcp-result').length, 10);
+    assert.equal(entries.filter(e => e.kind === 'skill-result').length, 5);
+    assert.equal(new Set(entries.map(e => e.id)).size, entries.length);
+    assert.ok(flowUsed(entries) > 150000 && flowUsed(entries) < flowMaxCapacity);
+    assert.equal(entries.at(-1)!.cached, false);
+    assert.ok(entries.slice(0, -1).every(e => e.cached));
+  });
+  it('stops at whole turns when the window fills', () => {
+    const { entries, turns } = emulateLongConversation([], { capacity: 64000, random: seeded(), startId: 1 });
+    assert.ok(turns > 0 && turns < 50);
+    assert.ok(flowUsed(entries) <= 64000);
+    assert.equal(entries.filter(e => e.kind === 'message').length, turns);
+  });
+  it('sums the cost of each request and grows faster than the context', () => {
+    const cost = (tokens: number) => tokens / 1000000;
+    const { entries } = emulateLongConversation([], { random: seeded(), startId: 1 });
+    let retained = flowBase;
+    let manual = 0;
+    for (const e of entries) { manual += cost(retained); retained += e.tokens; }
+    const spend = sessionSpend(entries, cost);
+    assert.equal(spend.requests, entries.length);
+    assert.ok(Math.abs(spend.total - manual) < 1e-12);
+    const half = sessionSpend(entries.slice(0, Math.floor(entries.length / 2)), cost).total;
+    assert.ok(spend.total > 2.5 * half);
   });
 });

@@ -96,6 +96,13 @@ try {
   activate('.call-list > div:nth-child(6) .call-button'); settle();
   check('Image attachment retains visual tokens alongside text and output', '(() => { const used=+document.querySelector(".retention-meter").getAttribute("aria-valuenow"); const timeline=document.querySelector(".flow-timeline").textContent; return used>=22960 && used<=23960 && timeline.includes("Attach image") && timeline.includes("1,560 image visual tokens"); })()');
   button('New session'); snapshot(); button('Clear');
+  check('Long-conversation emulation is hidden in the 64K window', '!document.querySelector(".emulate-button")');
+  activate('.flow-capacity-switch button:last-child');
+  activate('.emulate-button'); settle();
+  check('Emulating a long conversation fills 1M context and shows session spend', '(() => { const used=+document.querySelector(".retention-meter").getAttribute("aria-valuenow"); return used>200000 && document.querySelector(".flow-timeline").textContent.includes("round 50") && document.querySelector(".flow-session-spend strong").textContent.startsWith("$"); })()');
+  check('64K window is blocked while retained context exceeds it', 'document.querySelector(".flow-capacity-switch button:first-child").disabled');
+  button('New session'); snapshot(); button('Clear');
+  activate('.flow-capacity-switch button:first-child');
   noOverflow('Desktop MCP lab');
 
   nav('Prompt sandbox 07');
