@@ -56,7 +56,8 @@ describe('Token estimates and counters', () => {
   it('uses checked-in standard input pricing for every displayed model', () => {
     const byId = Object.fromEntries(models.map(model => [model.id, model]));
     assert.deepEqual(byId['fable-5-1'].pricing[0], { label: 'Standard', input: 10, cachedInput: 0.25, output: 50 });
-    assert.deepEqual(byId['claude-sonnet-5'].pricing[0], { label: 'Standard', input: 2, cachedInput: 0.2, output: 10 });
+    assert.deepEqual(byId['claude-opus-5-5'].pricing[0], { label: 'Standard', input: 4, cachedInput: 0.2, output: 20 });
+    assert.deepEqual(byId['claude-sonnet-5-5'].pricing[0], { label: 'Standard', input: 2, cachedInput: 0.2, output: 10 });
     assert.deepEqual(byId['claude-haiku-4.5'].pricing[0], { label: 'Standard', input: 1, cachedInput: 0.1, output: 5 });
     assert.deepEqual(byId['gpt-6-astra'].pricing[0], { label: 'Standard', input: 10, cachedInput: 1, output: 50 });
     assert.deepEqual(byId['gpt-5-6-family'].pricing.map(price => price.input), [4, 2, 0.2]);
@@ -65,9 +66,9 @@ describe('Token estimates and counters', () => {
   });
   it('provides individual selectable tiers and prices cached input independently', () => {
     assert.deepEqual(modelPriceOptions.map(option => option.name), [
-      'Fable 5.1', 'Claude Sonnet 5', 'Claude Haiku 4.5', 'GPT-6 Astra', 'Sol', 'Terra', 'Luna', 'Grok 4.6',
+      'Fable 5.1', 'Claude Opus 5.5', 'Claude Sonnet 5.5', 'Claude Haiku 4.5', 'GPT-6 Astra', 'Sol', 'Terra', 'Luna', 'Grok 4.6',
     ]);
-    const sonnet = modelPriceOptions.find(option => option.id === 'claude-sonnet-5-Standard')!;
+    const sonnet = modelPriceOptions.find(option => option.id === 'claude-sonnet-5-5-Standard')!;
     assert.equal(requestCost(1000000, 1000000, 1000000, sonnet.price, true), 12.2);
     assert.equal(requestCost(1000000, 1000000, 1000000, sonnet.price, false), 14);
   });

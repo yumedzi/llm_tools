@@ -722,7 +722,7 @@ export function FlowLabView() {
   );
   const [modelOptionId, setModelOptionId] = usePersistentState<string>(
     "context-lab:flow-model:v1",
-    "claude-sonnet-5-Standard",
+    "claude-sonnet-5-5-Standard",
     isFlowModelPriceOption,
   );
   const [useCachedInputRate, setUseCachedInputRate] = usePersistentState(
