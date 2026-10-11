@@ -56,6 +56,7 @@ import {
   formatNumber,
   hasLoadedMcpSchema,
   modelPriceOptions,
+  priceAt,
   retainCall,
   retainConversation,
   requestCost,
@@ -785,6 +786,7 @@ export function FlowLabView() {
   const selectedModel =
     modelPriceOptions.find((option) => option.id === modelOptionId) ??
     modelPriceOptions[0];
+  const currentPrice = priceAt(selectedModel.pricing, used);
   const cachedInputTokens = useCachedInputRate ? used : 0;
   const pricedInputTokens = used - cachedInputTokens;
   const nextOutputTokens = 2500;
@@ -793,7 +795,7 @@ export function FlowLabView() {
       useCachedInputRate ? 0 : retainedTokens,
       useCachedInputRate ? retainedTokens : 0,
       nextOutputTokens,
-      selectedModel.price,
+      priceAt(selectedModel.pricing, retainedTokens),
       useCachedInputRate,
     );
   const estimatedNextRequestCost = nextRequestCost(used);
@@ -1064,9 +1066,9 @@ export function FlowLabView() {
                     Use cached-context rate
                   </button>
                   <div className="flow-price-breakdown">
-                    <span>{formatNumber(pricedInputTokens)} uncached at ${selectedModel.price.input.toFixed(2)}/1M</span>
-                    <span>{formatNumber(cachedInputTokens)} cached at ${(useCachedInputRate ? selectedModel.price.cachedInput : selectedModel.price.input).toFixed(2)}/1M</span>
-                    <span>{formatNumber(nextOutputTokens)} output at ${selectedModel.price.output.toFixed(2)}/1M</span>
+                    <span>{formatNumber(pricedInputTokens)} uncached at ${currentPrice.input.toFixed(2)}/1M</span>
+                    <span>{formatNumber(cachedInputTokens)} cached at ${(useCachedInputRate ? currentPrice.cachedInput : currentPrice.input).toFixed(2)}/1M</span>
+                    <span>{formatNumber(nextOutputTokens)} output at ${currentPrice.output.toFixed(2)}/1M</span>
                   </div>
                   <p>Estimate for the retained session sent again with a 2.5K-token next response. It is a list-price illustration, not a provider invoice.</p>
                 </div>
@@ -1400,7 +1402,7 @@ export function FlowLabView() {
               const totalCost = nextRequestCost(retainedBefore + entry.tokens);
               const addedCost = totalCost - nextRequestCost(retainedBefore);
               const reasoningCost = entry.reasoningTokens
-                ? requestCost(0, 0, entry.reasoningTokens, selectedModel.price, false)
+                ? requestCost(0, 0, entry.reasoningTokens, currentPrice, false)
                 : 0;
               return (
                 <div

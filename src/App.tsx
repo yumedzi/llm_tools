@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { RiAnthropicFill, RiGrokAiFill, RiOpenaiFill } from "react-icons/ri";
+import { RiAnthropicFill, RiOpenaiFill } from "react-icons/ri";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -51,6 +51,7 @@ import {
   Workflow,
   X,
   Zap,
+  Hash,
 } from "lucide-react";
 import { ContextLabView, FlowLabView } from "./ContextFlowLabs";
 import { PricingSources, PricingTable } from "./PricingReference";
@@ -74,7 +75,9 @@ import {
   samples,
   wordCount,
 } from "./logic";
-import { openAITokenPieces } from "./tokenizers";
+import { tokenPieces } from "./tokenizers";
+import { TokenText } from "./TokenText";
+import { ModelChart } from "./ModelChart";
 import type { FlowEntry } from "./logic";
 import {
   IconButton,
@@ -501,41 +504,17 @@ function Tokenizer() {
   const [sample, setSample] = useState<keyof typeof samples>("prose");
   const [inputView, setInputView] = useState<"text" | "tokens">("text");
   const pricingAnchor = useRef<HTMLDivElement>(null);
-  const counts = useMemo(() => compareModelTokens(text), [text]);
-  const costs = useMemo(
-    () =>
-      models.map((model, index) =>
-        model.pricing.map(
-          (price) =>
-            (counts[index] *
-              (costDirection === "input"
-                ? price.input
-                : costDirection === "cached-input"
-                  ? price.cachedInput
-                  : price.output)) /
-            1000000,
-        ),
-      ),
-    [counts, costDirection],
+  const [mapTokenizer, setMapTokenizer] = usePersistentState<"claude5" | "o200k_base">(
+    "context-lab:token-map-tokenizer",
+    "claude5",
+    (v): v is "claude5" | "o200k_base" => v === "claude5" || v === "o200k_base",
   );
-  const selectedCosts = costs;
-  const values =
-    metric === "tokens"
-      ? counts
-      : selectedCosts.map(
-          (modelCosts) => Math.max(...modelCosts) * costMultiplier,
-        );
-  const peak = Math.max(...values, 0);
-  const magnitude = peak > 0 ? 10 ** Math.floor(Math.log10(peak)) : 1;
-  const max =
-    peak > 0
-      ? ([1, 2, 5, 10].find((tick) => tick * magnitude >= peak) ?? 10) *
-        magnitude
-      : metric === "tokens"
-        ? 100
-        : 0.001;
-  const openAITokens = counts[3] ?? 0;
-  const openAIPieces = useMemo(() => openAITokenPieces(text, 160), [text]);
+  const [showTokenIds, setShowTokenIds] = usePersistentState("context-lab:token-map-ids", true);
+  const counts = useMemo(() => compareModelTokens(text), [text]);
+  const mapTokens = counts[models.findIndex((model) => model.tokenizer === mapTokenizer)] ?? 0;
+  const mapPieces = useMemo(() => tokenPieces(text, mapTokenizer, 800), [text, mapTokenizer]);
+  const claudeMap = mapTokenizer === "claude5";
+  const countFor = (kind: "claude5" | "o200k_base") => counts[models.findIndex((model) => model.tokenizer === kind)] ?? 0;
   useEffect(() => {
     if (!showRates) return;
     const closeOnFocusOutside = (event: FocusEvent) => {
@@ -665,31 +644,38 @@ function Tokenizer() {
               </div>
             </>
           ) : (
-            <div className="token-map" aria-label="Exact o200k_base token map">
-              <span className="token-map-label">Exact OpenAI token map</span>
-              <div className="token-map-pieces">
-                {openAIPieces.length ? (
-                  openAIPieces.map((piece, index) => (
-                    <span
-                      className={`token-piece token-piece-${index % 6}`}
-                      key={`${piece.id}-${index}`}
-                      title={`Token ID ${piece.id}`}
-                    >
-                      <span className="token-piece-text">
-                        {piece.text.replaceAll(" ", "·").replaceAll("\n", "↵").replaceAll("\t", "⇥") || "∅"}
-                      </span>
-                      <small>{piece.id}</small>
-                    </span>
-                  ))
-                ) : (
-                  <span className="muted">Your tokens will appear here.</span>
-                )}
-                {openAITokens > openAIPieces.length && (
-                  <span className="token-map-more">
-                    +{formatNumber(openAITokens - openAIPieces.length)} more
-                  </span>
-                )}
+            <div className="token-map" aria-label={claudeMap ? "Approximate Claude 5 token map" : "Exact o200k_base token map"}>
+              <div className="token-map-toolbar">
+                <span className="token-map-label">
+                  {claudeMap ? "Claude 5 token map · approximation" : "OpenAI token map · exact o200k_base"}
+                </span>
+                <div className="token-map-controls">
+                  <div className="segmented token-map-switch" role="group" aria-label="Tokenizer">
+                    <button type="button" className={`btn ${claudeMap ? "active" : ""}`} onClick={() => setMapTokenizer("claude5")} aria-pressed={claudeMap}>
+                      <RiAnthropicFill size={12} aria-hidden="true" /> Claude 5 ≈
+                    </button>
+                    <button type="button" className={`btn ${!claudeMap ? "active" : ""}`} onClick={() => setMapTokenizer("o200k_base")} aria-pressed={!claudeMap}>
+                      <RiOpenaiFill size={12} aria-hidden="true" /> OpenAI
+                    </button>
+                  </div>
+                  <IconButton
+                    icon={Hash}
+                    className={`btn-ghost btn-small ${showTokenIds ? "active" : ""}`}
+                    onClick={() => setShowTokenIds((value) => !value)}
+                    aria-pressed={showTokenIds}
+                  >
+                    IDs
+                  </IconButton>
+                </div>
               </div>
+              <TokenText text={text} pieces={mapPieces} totalTokens={mapTokens} approximate={claudeMap} showIds={showTokenIds} />
+              {claudeMap && (
+                <p className="token-map-note">
+                  Anthropic doesn’t publish the Claude 5 tokenizer. Splits come from a reverse-engineered Claude
+                  vocabulary, restricted to mimic the newer tokenizer (~30% more tokens). IDs shown are vocabulary
+                  indices, not real Claude token IDs.
+                </p>
+              )}
             </div>
           )}
           <div className="input-stats" aria-live="polite">
@@ -704,8 +690,8 @@ function Tokenizer() {
               <span>characters</span>
             </div>
             <div className="highlight-stat">
-              <strong>{formatNumber(openAITokens)}</strong>
-              <span>OpenAI · exact o200k_base</span>
+              <strong>{formatNumber(mapTokens)}</strong>
+              <span>{claudeMap ? "Claude 5 · ≈ approximation" : "OpenAI · exact o200k_base"}</span>
             </div>
           </div>
         </section>
@@ -798,81 +784,25 @@ function Tokenizer() {
               >
                 x1000
               </IconButton>
+              {costMultiplier === 1000 && (
+                <p className="cost-multiplier-note" role="status">
+                  Cost of sending this text 1,000 times: e.g. Claude 5{" "}
+                  {formatNumber(countFor("claude5"))} × 1,000 ={" "}
+                  <strong>{formatNumber(countFor("claude5") * 1000)}</strong> tokens · OpenAI{" "}
+                  {formatNumber(countFor("o200k_base"))} × 1,000 ={" "}
+                  <strong>{formatNumber(countFor("o200k_base") * 1000)}</strong> tokens. Each row multiplies its own
+                  token count by 1,000.
+                </p>
+              )}
             </div>
           )}
 
-          <div className="model-chart">
-            {models.map((m, i) => {
-              const modelCosts = selectedCosts[i].map(
-                (cost) => cost * costMultiplier,
-              );
-              const lowCost = Math.min(...modelCosts);
-              const highCost = Math.max(...modelCosts);
-              return (
-                <div className="model-row" key={m.name}>
-                  <div className="model-heading">
-                    <div className="model-name">
-                      <span
-                        className="model-icon"
-                        style={{ color: m.color, background: `${m.color}13` }}
-                      >
-                        {m.family === "Claude" ? (
-                          <RiAnthropicFill size={14} />
-                        ) : m.family === "OpenAI" ? (
-                          <RiOpenaiFill size={14} />
-                        ) : (
-                          <RiGrokAiFill size={14} />
-                        )}
-                      </span>
-                      {m.name}
-                    </div>
-                    <span
-                      className={`model-value ${metric === "cost" && m.pricing.length > 1 ? "tiered-model-value" : ""}`}
-                      style={{ color: m.color }}
-                    >
-                      {metric === "tokens"
-                        ? formatNumber(counts[i])
-                        : lowCost === highCost
-                          ? `$${highCost.toFixed(6)}`
-                          : m.pricing.map((price, index) => (
-                              <span className="tiered-cost" key={price.label}>
-                                <small>{price.label}</small>
-                                ${modelCosts[index].toFixed(6)}
-                              </span>
-                            ))}
-                      <small>{metric === "tokens" ? "tokens" : "USD"}</small>
-                    </span>
-                  </div>
-                  <div
-                    className="bar-track"
-                    role="meter"
-                    aria-label={`${m.name} ${metric}`}
-                    aria-valuemin={0}
-                    aria-valuemax={max}
-                    aria-valuenow={values[i]}
-                  >
-                    <div
-                      className="bar-fill"
-                      style={
-                        {
-                          width: `${(values[i] / max) * 100}%`,
-                          "--bar-color": m.color,
-                        } as CSSProperties
-                      }
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="chart-axis">
-            <span>0</span>
-            <span>
-              {metric === "tokens"
-                ? `${formatNumber(max)} tokens`
-                : `$${max < 1e-8 ? "0" : max.toFixed(6)}`}
-            </span>
-          </div>
+          <ModelChart
+            counts={counts}
+            metric={metric}
+            costDirection={costDirection}
+            costMultiplier={costMultiplier}
+          />
         </section>
       </div>
       <div className="learning-callout">

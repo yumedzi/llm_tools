@@ -1,4 +1,4 @@
-import { models } from "./logic";
+import { modelGroups, models } from "./logic";
 
 export function PricingTable() {
   return (
@@ -13,26 +13,34 @@ export function PricingTable() {
         <span>Cached</span>
         <span>Output</span>
       </div>
-      {models.flatMap((model) =>
-        model.pricing.map((price) => (
-          <div
-            className="pricing-table-row"
-            role="row"
-            key={`${model.id}-${price.label}`}
-          >
-            <span>
-              <strong>
-                {model.pricing.length > 1
-                  ? `GPT-5.6 ${price.label}`
-                  : model.name}
-              </strong>
-            </span>
-            <span>${price.input.toFixed(2)}</span>
-            <span>${price.cachedInput.toFixed(2)}</span>
-            <span>${price.output.toFixed(2)}</span>
+      {modelGroups.map((group) => (
+        <div role="rowgroup" key={group}>
+          <div className="pricing-table-group" role="row">
+            <span>{group}</span>
           </div>
-        )),
-      )}
+          {models
+            .filter((model) => model.group === group)
+            .flatMap((model) =>
+              model.pricing.map((price) => (
+                <div
+                  className="pricing-table-row"
+                  role="row"
+                  key={`${model.id}-${price.label}`}
+                >
+                  <span>
+                    <strong>{model.name}</strong>
+                    {model.pricing.length > 1 && (
+                      <small>{price.label} context</small>
+                    )}
+                  </span>
+                  <span>${price.input.toFixed(2)}</span>
+                  <span>${price.cachedInput.toFixed(price.cachedInput < 0.01 ? 3 : 2)}</span>
+                  <span>${price.output.toFixed(2)}</span>
+                </div>
+              )),
+            )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -40,9 +48,10 @@ export function PricingTable() {
 export function PricingSources() {
   return (
     <p className="pricing-sources">
-      Sources: Anthropic API pricing, OpenAI API pricing, and xAI model pricing,
-      retrieved 2026-09-13. Grok 4.6 uses the under-200K-context tier; pricing
-      can change.
+      Sources: Anthropic, OpenAI, xAI, Google, DeepSeek, Z.ai, Moonshot and
+      Mistral API pricing pages, retrieved 2026-10-11. Long-context tiers bill
+      the whole request once the prompt crosses the threshold. DeepSeek shows
+      peak-hour rates; Gemini 3.1 Pro is in preview. Pricing can change.
     </p>
   );
 }

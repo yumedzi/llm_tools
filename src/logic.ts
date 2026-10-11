@@ -1,42 +1,62 @@
-import { countClaudeTokens, countTokens } from './tokenizers.ts';
+import { countClaude5Tokens, countTokens, type TokenizerKind } from './tokenizers.ts';
 
 export const formatNumber = (n: number) => new Intl.NumberFormat('en-US').format(n);
 export const compact = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : `${n}`;
 
-// The prompt sandbox uses the same offline ctoc approximation as Claude rows.
-export const estimateTokens = countClaudeTokens;
+// The prompt sandbox uses the same offline Claude 5 approximation as Claude rows.
+export const estimateTokens = countClaude5Tokens;
 export const wordCount = (s: string) => s.trim() ? (s.trim().match(/\S+/gu) ?? []).length : 0;
 export const characterCount = (s: string) => Array.from(s).length;
-export type ModelPrice = { label: string; input: number; cachedInput: number; output: number };
-export const models = [
-  { id: 'fable-5-1', name: 'Fable 5.1', family: 'Claude', color: '#b19aff', tokenizer: 'ctoc', countAdjustment: 1, pricing: [{ label: 'Standard', input: 10, cachedInput: 0.25, output: 50 }], note: 'ctoc proxy · newer-era calibration unavailable' },
-  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', family: 'Claude', color: '#e79bc6', tokenizer: 'ctoc', countAdjustment: 1, pricing: [{ label: 'Standard', input: 4, cachedInput: 0.2, output: 20 }], note: 'ctoc proxy · newer-era calibration unavailable' },
-  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', family: 'Claude', color: '#f3ba94', tokenizer: 'ctoc', countAdjustment: 1, pricing: [{ label: 'Standard', input: 2, cachedInput: 0.2, output: 10 }], note: 'ctoc proxy · newer-era calibration unavailable' },
-  { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', family: 'Claude', color: '#eccba7', tokenizer: 'ctoc', countAdjustment: 0.7, pricing: [{ label: 'Standard', input: 1, cachedInput: 0.1, output: 5 }], note: 'ctoc base · illustrative 30% lower-token calibration' },
-  { id: 'gpt-6-astra', name: 'GPT-6 Astra', family: 'OpenAI', color: '#74c5ff', tokenizer: 'o200k_base', countAdjustment: 1, pricing: [{ label: 'Standard', input: 10, cachedInput: 1, output: 50 }], note: 'js-tiktoken · o200k_base proxy · approximate' },
-  { id: 'gpt-5-6-family', name: 'GPT 5.6 (Sol / Terra / Luna)', family: 'OpenAI', color: '#90d9c1', tokenizer: 'o200k_base', countAdjustment: 1, pricing: [{ label: 'Sol', input: 4, cachedInput: 0.4, output: 20 }, { label: 'Terra', input: 2, cachedInput: 0.2, output: 12 }, { label: 'Luna', input: 0.2, cachedInput: 0.02, output: 1.2 }], note: 'js-tiktoken · o200k_base · plain-text count' },
-  { id: 'grok-4.6', name: 'Grok 4.6', family: 'Grok', color: '#8baffb', tokenizer: 'o200k_base', countAdjustment: 1, pricing: [{ label: 'Under 200K context', input: 2, cachedInput: 0.5, output: 6 }], note: 'js-tiktoken · o200k_base proxy · approximate' },
-  // Disabled for now: only Claude, OpenAI, and Grok are shown.
-  // { id: 'deepseek-flash-4.1', name: 'DeepSeek Flash 4.1', family: 'DeepSeek', color: '#8baffb', rate: 0.14 },
-] as const;
-export type Model = typeof models[number];
-export const modelPriceOptions = models.flatMap((model) =>
-  model.pricing.map((price) => ({
-    id: `${model.id}-${price.label}`,
-    name: model.pricing.length === 1 ? model.name : price.label,
-    modelName: model.name,
-    color: model.color,
-    price,
-  })),
-);
+// `overContext`: this tier bills the WHOLE request when the prompt exceeds that many tokens.
+export type ModelPrice = { label: string; input: number; cachedInput: number; output: number; overContext?: number };
+export type ModelGroup = 'Anthropic' | 'OpenAI' | 'Other';
+export type ModelFamily = 'Claude' | 'OpenAI' | 'Grok' | 'DeepSeek' | 'GLM' | 'Gemini' | 'Kimi' | 'Mistral';
+export type ModelSpec = { id: string; name: string; group: ModelGroup; family: ModelFamily; color: string; tokenizer: TokenizerKind; pricing: readonly ModelPrice[]; note: string };
+const tier = (label: string, overContext: number, input: number, cachedInput: number, output: number): ModelPrice => ({ label, overContext, input, cachedInput, output });
+const flat = (input: number, cachedInput: number, output: number): ModelPrice[] => [{ label: 'Standard', input, cachedInput, output }];
+// USD per 1M tokens, checked on vendor pages 2026-10-11. Non-Claude/OpenAI rows use o200k_base as a proxy.
+export const models: readonly ModelSpec[] = [
+  { id: 'fable-5-1', name: 'Fable 5.1', group: 'Anthropic', family: 'Claude', color: '#b19aff', tokenizer: 'claude5', pricing: flat(10, 0.25, 50), note: 'Claude 5 tokenizer approximation' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', group: 'Anthropic', family: 'Claude', color: '#e79bc6', tokenizer: 'claude5', pricing: flat(4, 0.2, 20), note: 'Claude 5 tokenizer approximation' },
+  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', group: 'Anthropic', family: 'Claude', color: '#f3ba94', tokenizer: 'claude5', pricing: flat(2, 0.1, 10), note: 'Claude 5 tokenizer approximation' },
+  { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', group: 'Anthropic', family: 'Claude', color: '#9fd8a8', tokenizer: 'claude5', pricing: [{ label: '≤100K', input: 0.1, cachedInput: 0.01, output: 0.5 }, tier('>100K', 100000, 0.5, 0.05, 2.5)], note: 'Claude 5 tokenizer approximation' },
+  { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', group: 'Anthropic', family: 'Claude', color: '#eccba7', tokenizer: 'ctoc', pricing: flat(1, 0.1, 5), note: 'Legacy Claude 3–4.6 tokenizer (ctoc)' },
+  { id: 'gpt-6-astra', name: 'GPT-6 Astra', group: 'OpenAI', family: 'OpenAI', color: '#74c5ff', tokenizer: 'o200k_base', pricing: [{ label: '≤272K', input: 10, cachedInput: 1, output: 50 }, tier('>272K', 272000, 20, 2, 75)], note: 'js-tiktoken · o200k_base' },
+  { id: 'gpt-6-1-sol', name: 'GPT-6.1 Sol', group: 'OpenAI', family: 'OpenAI', color: '#90d9c1', tokenizer: 'o200k_base', pricing: [{ label: '≤272K', input: 2, cachedInput: 0.1, output: 10 }, tier('>272K', 272000, 4, 0.2, 15)], note: 'js-tiktoken · o200k_base' },
+  { id: 'gpt-6-luna', name: 'GPT-6 Luna', group: 'OpenAI', family: 'OpenAI', color: '#b8e986', tokenizer: 'o200k_base', pricing: [{ label: '≤272K', input: 0.1, cachedInput: 0.01, output: 0.5 }, tier('>272K', 272000, 0.2, 0.02, 0.75)], note: 'js-tiktoken · o200k_base' },
+  { id: 'gpt-5-6-sol', name: 'GPT-5.6 Sol', group: 'OpenAI', family: 'OpenAI', color: '#5fb8a0', tokenizer: 'o200k_base', pricing: [{ label: '≤272K', input: 4, cachedInput: 0.4, output: 20 }, tier('>272K', 272000, 8, 0.8, 30)], note: 'js-tiktoken · o200k_base · promotional price' },
+  { id: 'gpt-5-6-terra', name: 'GPT-5.6 Terra', group: 'OpenAI', family: 'OpenAI', color: '#7fc8d8', tokenizer: 'o200k_base', pricing: [{ label: '≤272K', input: 2, cachedInput: 0.2, output: 12 }, tier('>272K', 272000, 4, 0.4, 18)], note: 'js-tiktoken · o200k_base' },
+  { id: 'gpt-5-6-luna', name: 'GPT-5.6 Luna', group: 'OpenAI', family: 'OpenAI', color: '#a5b4fc', tokenizer: 'o200k_base', pricing: [{ label: '≤272K', input: 0.2, cachedInput: 0.02, output: 1.2 }, tier('>272K', 272000, 0.4, 0.04, 1.8)], note: 'js-tiktoken · o200k_base' },
+  { id: 'grok-4-7', name: 'Grok 4.7', group: 'Other', family: 'Grok', color: '#8baffb', tokenizer: 'o200k_base', pricing: [{ label: '≤200K', input: 2, cachedInput: 0.5, output: 6 }, tier('>200K', 200000, 4, 1, 12)], note: 'o200k_base proxy · approximate' },
+  { id: 'gemini-3-1-pro', name: 'Gemini 3.1 Pro', group: 'Other', family: 'Gemini', color: '#7aa7ff', tokenizer: 'o200k_base', pricing: [{ label: '≤200K', input: 2, cachedInput: 0.2, output: 12 }, tier('>200K', 200000, 4, 0.4, 18)], note: 'o200k_base proxy · preview pricing' },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', group: 'Other', family: 'DeepSeek', color: '#6f8cff', tokenizer: 'o200k_base', pricing: flat(1.32, 0.044, 3.96), note: 'o200k_base proxy · peak-hour price' },
+  { id: 'deepseek-v4-1-flash', name: 'DeepSeek V4.1 Flash', group: 'Other', family: 'DeepSeek', color: '#9fb4ff', tokenizer: 'o200k_base', pricing: flat(0.3, 0.006, 1.2), note: 'o200k_base proxy · peak-hour price' },
+  { id: 'glm-5-3', name: 'GLM-5.3', group: 'Other', family: 'GLM', color: '#c4a7ff', tokenizer: 'o200k_base', pricing: flat(1.4, 0.26, 4.4), note: 'o200k_base proxy · approximate' },
+  { id: 'kimi-k3', name: 'Kimi K3', group: 'Other', family: 'Kimi', color: '#f0a3ff', tokenizer: 'o200k_base', pricing: flat(3, 0.3, 15), note: 'o200k_base proxy · approximate' },
+  { id: 'mistral-large-3', name: 'Mistral Large 3', group: 'Other', family: 'Mistral', color: '#ffb36b', tokenizer: 'o200k_base', pricing: flat(0.5, 0.05, 1.5), note: 'o200k_base proxy · approximate' },
+];
+export type Model = ModelSpec;
+export const modelGroups: readonly ModelGroup[] = ['Anthropic', 'OpenAI', 'Other'];
+// The tier that bills a prompt of `contextTokens`: the highest threshold it exceeds.
+export function priceAt(pricing: readonly ModelPrice[], contextTokens: number): ModelPrice {
+  return pricing.reduce((best, price) => (price.overContext ?? 0) < contextTokens && (price.overContext ?? 0) >= (best.overContext ?? 0) ? price : best, pricing[0]);
+}
+export const modelPriceOptions = models.map((model) => ({
+  id: model.id,
+  name: model.name,
+  modelName: model.name,
+  color: model.color,
+  price: model.pricing[0],
+  pricing: model.pricing,
+}));
 export type ModelPriceOption = (typeof modelPriceOptions)[number];
-export const countModelTokens = (text: string, model: Model): number => Math.ceil(countTokens(text, model.tokenizer) * model.countAdjustment);
+export const countModelTokens = (text: string, model: Model): number => countTokens(text, model.tokenizer);
 export function compareModelTokens(text: string): number[] {
   // Shared backends are evaluated once per input, not once per model row.
-  const counts = new Map<string, number>();
+  const counts = new Map<TokenizerKind, number>();
   return models.map(model => {
     if (!counts.has(model.tokenizer)) counts.set(model.tokenizer, countTokens(text, model.tokenizer));
-    return Math.ceil(counts.get(model.tokenizer)! * model.countAdjustment);
+    return counts.get(model.tokenizer)!;
   });
 }
 export const inputCost = (tokens: number, price: ModelPrice): number => tokens * price.input / 1000000;

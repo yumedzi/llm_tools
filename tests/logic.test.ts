@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { allocationTotal, emulateLongConversation, flowMaxCapacity, sessionSpend, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningMaxTokens, conversationReasoningMinTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelPriceOptions, models, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
-import { countClaudeTokens, countOpenAITokens, openAITokenIds, openAITokenPieces } from '../src/tokenizers.ts';
+import { allocationTotal, emulateLongConversation, flowMaxCapacity, sessionSpend, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningMaxTokens, conversationReasoningMinTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelGroups, modelPriceOptions, models, priceAt, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
+import { claude5Pieces, countClaude5Tokens, countClaudeTokens, countOpenAITokens, countTokens, openAITokenIds, openAITokenPieces, tokenPieces } from '../src/tokenizers.ts';
 import type { FlowEntry } from '../src/logic.ts';
 import { causalAttention, createTransformerTrace, decodeCandidates, seededSample, softmax } from '../src/transformerLogic.ts';
 import { createTransformerBlockTrace } from '../src/transformerBlockLogic.ts';
@@ -31,16 +31,32 @@ describe('Token estimates and counters', () => {
   it('handles 100,000 characters without invalid counts', () => {
     assert.ok(estimateTokens('a'.repeat(100000)) > 0);
   });
-  it('routes Claude through ctoc and OpenAI and Grok through o200k_base', () => {
+  it('routes Claude 5 through the approximation, Haiku 4.5 through ctoc, others through o200k_base', () => {
     const text = samples.multilingual;
-    const expected = models.map(model => Math.ceil((model.tokenizer === 'ctoc' ? countClaudeTokens(text) : countOpenAITokens(text)) * model.countAdjustment));
+    const expected = models.map(model => countTokens(text, model.tokenizer));
     assert.deepEqual(compareModelTokens(text), expected);
     assert.equal(models[0].name, 'Fable 5.1');
-    assert.deepEqual(models.filter(model => model.family === 'OpenAI').map(model => model.name), ['GPT-6 Astra', 'GPT 5.6 (Sol / Terra / Luna)']);
-    assert.equal(models.at(-1)?.name, 'Grok 4.6');
-    const haiku = models.find(model => model.name === 'Claude Haiku 4.5')!;
-    assert.equal(haiku.countAdjustment, 0.7);
-    assert.equal(countModelTokens(text, haiku), Math.ceil(countClaudeTokens(text) * 0.7));
+    assert.deepEqual(modelGroups, ['Anthropic', 'OpenAI', 'Other']);
+    assert.deepEqual(models.filter(model => model.group === 'OpenAI').map(model => model.name), ['GPT-6 Astra', 'GPT-6.1 Sol', 'GPT-6 Luna', 'GPT-5.6 Sol', 'GPT-5.6 Terra', 'GPT-5.6 Luna']);
+    assert.deepEqual(models.filter(model => model.group === 'Other').map(model => model.name), ['Grok 4.7', 'Gemini 3.1 Pro', 'DeepSeek V4 Pro', 'DeepSeek V4.1 Flash', 'GLM-5.3', 'Kimi K3', 'Mistral Large 3']);
+    const haiku45 = models.find(model => model.id === 'claude-haiku-4-5')!;
+    const haiku55 = models.find(model => model.id === 'claude-haiku-5-5')!;
+    assert.equal(countModelTokens(text, haiku45), countClaudeTokens(text));
+    assert.equal(countModelTokens(text, haiku55), countClaude5Tokens(text));
+    // Haiku 4.5: fewer tokens but a higher per-request cost than Haiku 5.5 at ≤100K.
+    for (const sample of Object.values(samples)) {
+      const old = countModelTokens(sample, haiku45), next = countModelTokens(sample, haiku55);
+      assert.ok(old < next);
+      assert.ok(inputCost(old, haiku45.pricing[0]) > inputCost(next, haiku55.pricing[0]));
+    }
+  });
+  it('calibrates the Claude 5 approximation to the documented ~1.0–1.35x (code higher) range', () => {
+    const ratio = (text: string) => countClaude5Tokens(text) / countClaudeTokens(text);
+    assert.ok(ratio(samples.prose) >= 1.15 && ratio(samples.prose) <= 1.35, `prose ${ratio(samples.prose)}`);
+    assert.ok(ratio(samples.code) >= 1.3 && ratio(samples.code) <= 1.5, `code ${ratio(samples.code)}`);
+    assert.ok(ratio(samples.multilingual) >= 1.05 && ratio(samples.multilingual) <= 1.4, `multilingual ${ratio(samples.multilingual)}`);
+    const all = Object.values(samples).join('\n');
+    assert.ok(ratio(all) >= 1.15 && ratio(all) <= 1.35, `all ${ratio(all)}`);
   });
   it('exposes exact OpenAI token IDs for the o200k_base visualization', () => {
     const text = 'Hello, world!';
@@ -53,23 +69,38 @@ describe('Token estimates and counters', () => {
     assert.deepEqual(pieces.map(piece => piece.id), ids);
     assert.equal(pieces.map(piece => piece.text).join(''), text);
   });
-  it('uses checked-in standard input pricing for every displayed model', () => {
+  it('maps every tokenizer\'s pieces back onto the exact source text, including emoji and CJK', () => {
+    for (const tokenizer of ['ctoc', 'claude5', 'o200k_base'] as const) {
+      for (const text of [...Object.values(samples), '🚀 café 你好 \t\n  x', 'Гей, десь там']) {
+        const pieces = tokenPieces(text, tokenizer, 10000);
+        assert.equal(pieces.map(piece => piece.text).join(''), text, tokenizer);
+        pieces.forEach((piece, index) => {
+          assert.equal(text.slice(piece.start, piece.end), piece.text);
+          if (index) assert.equal(piece.start, pieces[index - 1].end);
+        });
+        assert.equal(pieces.reduce((sum, piece) => sum + piece.tokens, 0), countTokens(text, tokenizer), `${tokenizer} ${text}`);
+      }
+    }
+    assert.equal(claude5Pieces(samples.prose, 5).length, 5);
+  });
+  it('uses checked-in pricing for every displayed model, with long-context tiers', () => {
     const byId = Object.fromEntries(models.map(model => [model.id, model]));
     assert.deepEqual(byId['fable-5-1'].pricing[0], { label: 'Standard', input: 10, cachedInput: 0.25, output: 50 });
     assert.deepEqual(byId['claude-opus-5-5'].pricing[0], { label: 'Standard', input: 4, cachedInput: 0.2, output: 20 });
-    assert.deepEqual(byId['claude-sonnet-5-5'].pricing[0], { label: 'Standard', input: 2, cachedInput: 0.2, output: 10 });
-    assert.deepEqual(byId['claude-haiku-4.5'].pricing[0], { label: 'Standard', input: 1, cachedInput: 0.1, output: 5 });
-    assert.deepEqual(byId['gpt-6-astra'].pricing[0], { label: 'Standard', input: 10, cachedInput: 1, output: 50 });
-    assert.deepEqual(byId['gpt-5-6-family'].pricing.map(price => price.input), [4, 2, 0.2]);
-    assert.deepEqual(byId['grok-4.6'].pricing[0], { label: 'Under 200K context', input: 2, cachedInput: 0.5, output: 6 });
-    assert.equal(inputCost(1000000, byId['gpt-5-6-family'].pricing[2]), 0.2);
+    assert.deepEqual(byId['claude-sonnet-5-5'].pricing[0], { label: 'Standard', input: 2, cachedInput: 0.1, output: 10 });
+    assert.deepEqual(byId['claude-haiku-4-5'].pricing[0], { label: 'Standard', input: 1, cachedInput: 0.1, output: 5 });
+    assert.deepEqual(byId['claude-haiku-5-5'].pricing.map(price => [price.input, price.cachedInput, price.output]), [[0.1, 0.01, 0.5], [0.5, 0.05, 2.5]]);
+    assert.deepEqual(byId['gpt-6-astra'].pricing.map(price => price.input), [10, 20]);
+    assert.deepEqual(byId['gpt-5-6-luna'].pricing[0], { label: '≤272K', input: 0.2, cachedInput: 0.02, output: 1.2 });
+    assert.deepEqual(byId['grok-4-7'].pricing[1], { label: '>200K', overContext: 200000, input: 4, cachedInput: 1, output: 12 });
+    assert.equal(priceAt(byId['claude-haiku-5-5'].pricing, 100000).input, 0.1);
+    assert.equal(priceAt(byId['claude-haiku-5-5'].pricing, 100001).input, 0.5);
+    assert.equal(priceAt(byId['fable-5-1'].pricing, 900000).input, 10);
   });
-  it('provides individual selectable tiers and prices cached input independently', () => {
-    assert.deepEqual(modelPriceOptions.map(option => option.name), [
-      'Fable 5.1', 'Claude Opus 5.5', 'Claude Sonnet 5.5', 'Claude Haiku 4.5', 'GPT-6 Astra', 'Sol', 'Terra', 'Luna', 'Grok 4.6',
-    ]);
-    const sonnet = modelPriceOptions.find(option => option.id === 'claude-sonnet-5-5-Standard')!;
-    assert.equal(requestCost(1000000, 1000000, 1000000, sonnet.price, true), 12.2);
+  it('provides one selectable option per model and prices cached input independently', () => {
+    assert.deepEqual(modelPriceOptions.map(option => option.id), models.map(model => model.id));
+    const sonnet = modelPriceOptions.find(option => option.id === 'claude-sonnet-5-5')!;
+    assert.equal(requestCost(1000000, 1000000, 1000000, sonnet.price, true), 12.1);
     assert.equal(requestCost(1000000, 1000000, 1000000, sonnet.price, false), 14);
   });
   it('preserves the full original text when visual pieces are joined', () => {

@@ -32,14 +32,14 @@ try {
   evaluate(`Object.keys(localStorage).filter(k=>k.startsWith('context-lab:')).forEach(k=>localStorage.removeItem(k)); location.reload()`);
   snapshot();
   browser('set', 'viewport', '1440', '1080');
-  check('Tokenizer groups GPT 5.6 variants into five model profiles', 'document.querySelectorAll(".model-row").length === 5 && document.querySelector(".model-chart").textContent.includes("GPT 5.6 (Sol / Terra / Luna)")');
+  check('Tokenizer groups models into an accordion with Anthropic open', 'document.querySelectorAll(".model-group").length === 3 && document.querySelectorAll(".model-group-header[aria-expanded=\\"true\\"]").length === 1 && document.querySelectorAll(".model-row").length === 5');
   browser('fill', '[aria-label="Text to tokenize"]', 'Hello world');
   check('Live words, characters, and tokens update', 'document.querySelector(".input-stats").textContent.includes("2words") && document.querySelector(".input-stats").textContent.includes("11characters") && [...document.querySelectorAll(".bar-track")].every(e=>+e.getAttribute("aria-valuenow")>0)');
-  check('Haiku displays a lower calibrated count', '+document.querySelector(".bar-track[aria-label*=\"Claude Haiku\"]").getAttribute("aria-valuenow") < +document.querySelector(".bar-track[aria-label*=\"Claude Sonnet\"]").getAttribute("aria-valuenow")');
   button('Clear input text');
   check('Cleared text produces zero counts and bars', '[...document.querySelectorAll(".bar-track")].every(e=>+e.getAttribute("aria-valuenow")===0)');
   button('Multilingual');
   check('Unicode sample is loaded', 'document.querySelector("textarea").value.includes("こんにちは")');
+  check('Haiku 4.5 (legacy tokenizer) displays fewer tokens than Haiku 5.5', '+document.querySelector(".bar-track[aria-label*=\"Claude Haiku 4.5\"]").getAttribute("aria-valuenow") < +document.querySelector(".bar-track[aria-label*=\"Claude Haiku 5.5\"]").getAttribute("aria-valuenow")');
   button('Cost');
   check('Cost direction controls are separate from display mode', 'document.querySelector("[aria-label=\\"Cost token direction\\"]")?.textContent.includes("Input") && document.querySelector("[aria-label=\\"Cost token direction\\"]")?.textContent.includes("Output")');
   button('Output');
@@ -69,7 +69,7 @@ try {
   check('Flow pricing estimate stays hidden until requested', '!document.querySelector(".flow-pricing-popover")');
   activate('[aria-label="Open pricing settings"]');
   check('Flow pricing lists all input, cached input, and output rates', 'document.querySelector(".flow-pricing-popover").textContent.includes("input at") && document.querySelector(".flow-pricing-popover").textContent.includes("cached at") && document.querySelector(".flow-pricing-popover").textContent.includes("output at")');
-  check('Flow model menu includes GPT-6 Astra before GPT 5.6 tiers', '(() => { const labels=[...document.querySelector("[aria-label=\\"Model tier for request cost\\"]").options].map(option=>option.textContent); return labels.indexOf("GPT-6 Astra") >= 0 && labels.indexOf("GPT-6 Astra") < labels.indexOf("GPT 5.6 (Sol / Terra / Luna) - Sol"); })()');
+  check('Flow model menu includes GPT-6 Astra before GPT-5.6 Sol', '(() => { const labels=[...document.querySelector("[aria-label=\\"Model tier for request cost\\"]").options].map(option=>option.textContent); return labels.indexOf("GPT-6 Astra") >= 0 && labels.indexOf("GPT-6 Astra") < labels.indexOf("GPT-5.6 Sol"); })()');
   check('Flow pricing reference stays hidden until requested', '!document.querySelector(".flow-pricing-table-wrap")');
   button('Pricing');
   check('Flow pricing reference opens on demand', '!!document.querySelector(".flow-pricing-reference .pricing-table")');
