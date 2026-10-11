@@ -514,7 +514,7 @@ function Tokenizer() {
   const mapTokens = counts[models.findIndex((model) => model.tokenizer === mapTokenizer)] ?? 0;
   const mapPieces = useMemo(() => tokenPieces(text, mapTokenizer, 800), [text, mapTokenizer]);
   const claudeMap = mapTokenizer === "claude5";
-  const countFor = (kind: "claude5" | "o200k_base") => counts[models.findIndex((model) => model.tokenizer === kind)] ?? 0;
+  const countFor = (kind: "claude5" | "o200k_base"): number => counts[models.findIndex((model) => model.tokenizer === kind)] ?? 0;
   useEffect(() => {
     if (!showRates) return;
     const closeOnFocusOutside = (event: FocusEvent) => {
@@ -689,9 +689,13 @@ function Tokenizer() {
               <strong>{formatNumber(characterCount(text))}</strong>
               <span>characters</span>
             </div>
-            <div className="highlight-stat">
-              <strong>{formatNumber(mapTokens)}</strong>
-              <span>{claudeMap ? "Claude 5 · ≈ approximation" : "OpenAI · exact o200k_base"}</span>
+            <div className={claudeMap ? "highlight-stat" : ""}>
+              <strong>{formatNumber(countFor("claude5"))}</strong>
+              <span>Claude 5 · ≈ approx.</span>
+            </div>
+            <div className={claudeMap ? "" : "highlight-stat"}>
+              <strong>{formatNumber(countFor("o200k_base"))}</strong>
+              <span>OpenAI · exact</span>
             </div>
           </div>
         </section>
@@ -784,16 +788,6 @@ function Tokenizer() {
               >
                 x1000
               </IconButton>
-              {costMultiplier === 1000 && (
-                <p className="cost-multiplier-note" role="status">
-                  Cost of sending this text 1,000 times: e.g. Claude 5{" "}
-                  {formatNumber(countFor("claude5"))} × 1,000 ={" "}
-                  <strong>{formatNumber(countFor("claude5") * 1000)}</strong> tokens · OpenAI{" "}
-                  {formatNumber(countFor("o200k_base"))} × 1,000 ={" "}
-                  <strong>{formatNumber(countFor("o200k_base") * 1000)}</strong> tokens. Each row multiplies its own
-                  token count by 1,000.
-                </p>
-              )}
             </div>
           )}
 

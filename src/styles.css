@@ -133,3 +133,7 @@
 .pricing-table-group{padding:7px 12px;border-top:1px solid #2b2734;background:#17151e;color:#b8acc8;font-size:8px;font-weight:600;letter-spacing:.9px;text-transform:uppercase}
 .chart-pricing-popover .pricing-table{max-height:min(420px,60vh);overflow-y:auto}.chart-pricing-popover .pricing-table-head{position:sticky;top:0;z-index:1}.chart-pricing-popover .pricing-table-group{padding:6px 10px;font-size:7px}
 .chart-cost-controls{flex-wrap:wrap}.cost-multiplier-note{flex-basis:100%;margin:2px 0 0;color:#9fa2b4;font-size:9px;line-height:1.55}.cost-multiplier-note strong{color:#e4e1ee;font-family:"SFMono-Regular",Consolas,monospace;font-weight:550}
+.input-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+.model-group-tokens{padding:1px 6px;border:1px solid #3a3c4a;border-radius:999px;background:#1d1e28;color:#c9c6d6;font-family:"SFMono-Regular",Consolas,monospace;font-size:8.5px;white-space:nowrap}
+.model-group-title{white-space:nowrap;min-width:0}
+.model-group-title{overflow:hidden}

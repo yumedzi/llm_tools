@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { ChevronDown, Sparkles } from "lucide-react";
 import { RiAnthropicFill, RiDeepseekFill, RiGeminiFill, RiGrokAiFill, RiOpenaiFill } from "react-icons/ri";
 import { SiMistralai } from "react-icons/si";
-import { formatNumber, modelGroups, models } from "./logic";
+import { compact, formatNumber, modelGroups, models } from "./logic";
 import type { ModelFamily, ModelGroup, ModelPrice } from "./logic";
 
 export type CostDirection = "input" | "cached-input" | "output";
@@ -59,6 +59,9 @@ export function ModelChart({
           const low = Math.min(...base);
           const high = Math.max(...base);
           const open = openGroup === group;
+          const groupTokens = groupRows.map((row) => counts[models.indexOf(row.model)] * costMultiplier);
+          const tokenLow = Math.min(...groupTokens);
+          const tokenHigh = Math.max(...groupTokens);
           const panelId = `model-group-${group.toLowerCase()}`;
           return (
             <section className={`model-group ${open ? "is-open" : ""}`} key={group}>
@@ -76,7 +79,15 @@ export function ModelChart({
                 </span>
                 <span className="model-group-title">
                   <strong>{group}</strong>
-                  <small>{groupRows.length} models</small>
+                  {metric === "tokens" && <small>{groupRows.length} models</small>}
+                  {metric === "cost" && (
+                    <span
+                      className="model-group-tokens"
+                      title={costMultiplier > 1 ? `Token count × ${formatNumber(costMultiplier)} requests` : "Tokens priced in this group"}
+                    >
+                      {tokenLow === tokenHigh ? compact(tokenLow) : `${compact(tokenLow)}–${compact(tokenHigh)}`} tok
+                    </span>
+                  )}
                 </span>
                 <span className="model-group-range">
                   {low === high ? format(low) : `${format(low)} – ${format(high)}`}
