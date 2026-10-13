@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { ChevronLeft, ChevronRight, CirclePlay, Cpu, Pause, RotateCcw, Sparkles } from "lucide-react";
 import { createTransformerTrace, decodeCandidates, seededSample, transformerPresets } from "./transformerLogic";
 import type { Candidate, TransformerPresetId } from "./transformerLogic";
-import { InfoTooltip, SectionLabel, TooltipNote, usePersistentState } from "./ui";
+import { InfoTooltip, SectionLabel, TooltipNote, usePersistentState, useThemeValue } from "./ui";
 
 const stages = [
   ["Tokenize", "Words become discrete IDs the network can process."],
@@ -26,9 +26,17 @@ type LabState = { preset: TransformerPresetId; temperature: number; topK: number
 const initial: LabState = { preset: "capital", temperature: 0.8, topK: 3, seed: 42 };
 const validState = (value: unknown): value is LabState => typeof value === "object" && value !== null && ["capital", "agreement", "coreference", "three-relations"].includes((value as LabState).preset) && Number.isFinite((value as LabState).temperature) && Number.isFinite((value as LabState).topK) && Number.isFinite((value as LabState).seed);
 
+// Light-theme counterparts for canvas colors (same mapping as scripts/lightify-css.mjs).
+const lightCanvas: Record<string, string> = {
+  "#11131a": "#fefefe", "#888c9e": "#828696", "#8baffb": "#5174c3", "#90d9c1": "#1c755e", "#9fa3b5": "#636779",
+  "#a4e6d1": "#0d604e", "#b19aff": "#7f63cd", "#d7c6ff": "#645289", "#e6e4ec": "#17151b", "#f3ba94": "#8f572f",
+};
+
 function InferenceCanvas({ stage, tokens, candidates }: { stage: number; tokens: string[]; candidates: Candidate[] }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const theme = useThemeValue();
   useEffect(() => {
+    const paint = (color: string) => (theme === "light" ? lightCanvas[color] ?? color : color);
     const element = canvas.current;
     if (!element) return;
     const context = element.getContext("2d");
@@ -49,33 +57,33 @@ function InferenceCanvas({ stage, tokens, candidates }: { stage: number; tokens:
       context.fillStyle = "rgba(139,175,251,.035)";
       for (let x = 0; x < box.width; x += 24) context.fillRect(x, 0, 1, box.height);
       for (let y = 0; y < box.height; y += 24) context.fillRect(0, y, box.width, 1);
-      const chip = (x: number, y: number, label: string, color: string) => { context.fillStyle = color; context.fillRect(x - 29, y - 12, 58, 24); context.fillStyle = "#11131a"; context.font = "9px monospace"; context.textAlign = "center"; context.fillText(label, x, y + 3); };
+      const chip = (x: number, y: number, label: string, color: string) => { context.fillStyle = color; context.fillRect(x - 29, y - 12, 58, 24); context.fillStyle = paint("#11131a"); context.font = "9px monospace"; context.textAlign = "center"; context.fillText(label, x, y + 3); };
       const particle = (x: number, y: number, color: string, radius = 2) => { context.fillStyle = color; context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2); context.fill(); };
       if (stage === 0) {
-        tokens.forEach((token, index) => { const x = 72 + index * ((box.width - 144) / Math.max(1, tokens.length - 1)); chip(x, centerY, token, index === tokens.length - 1 ? "#f3ba94" : "#90d9c1"); context.fillStyle = "#888c9e"; context.textAlign = "center"; context.font = "8px monospace"; context.fillText(`ID ${index + 1}`, x, centerY + 32); });
-        context.fillStyle = "#9fa3b5"; context.textAlign = "center"; context.font = "11px monospace"; context.fillText("text pieces → token IDs", box.width / 2, headerY);
+        tokens.forEach((token, index) => { const x = 72 + index * ((box.width - 144) / Math.max(1, tokens.length - 1)); chip(x, centerY, token, index === tokens.length - 1 ? paint("#f3ba94") : paint("#90d9c1")); context.fillStyle = paint("#888c9e"); context.textAlign = "center"; context.font = "8px monospace"; context.fillText(`ID ${index + 1}`, x, centerY + 32); });
+        context.fillStyle = paint("#9fa3b5"); context.textAlign = "center"; context.font = "11px monospace"; context.fillText("text pieces → token IDs", box.width / 2, headerY);
       } else if (stage === 1) {
-        tokens.forEach((token, tokenIndex) => { const x = 74 + tokenIndex * ((box.width - 148) / Math.max(1, tokens.length - 1)); context.fillStyle = "#a4e6d1"; context.font = "9px monospace"; context.textAlign = "center"; context.fillText(token, x, contentTop); for (let dimension = 0; dimension < 4; dimension += 1) { const value = ((tokenIndex * 3 + dimension * 5) % 9) / 9; context.fillStyle = `rgba(139,175,251,${0.18 + value * 0.72})`; context.fillRect(x - 14 + dimension * 8, centerY - 20, 6, 40); } context.fillStyle = "#f3ba94"; context.fillRect(x - 18, centerY + 27, 36, 5); });
-        context.fillStyle = "#9fa3b5"; context.textAlign = "center"; context.font = "11px monospace"; context.fillText("token embedding + position signal", box.width / 2, headerY);
+        tokens.forEach((token, tokenIndex) => { const x = 74 + tokenIndex * ((box.width - 148) / Math.max(1, tokens.length - 1)); context.fillStyle = paint("#a4e6d1"); context.font = "9px monospace"; context.textAlign = "center"; context.fillText(token, x, contentTop); for (let dimension = 0; dimension < 4; dimension += 1) { const value = ((tokenIndex * 3 + dimension * 5) % 9) / 9; context.fillStyle = `rgba(139,175,251,${0.18 + value * 0.72})`; context.fillRect(x - 14 + dimension * 8, centerY - 20, 6, 40); } context.fillStyle = paint("#f3ba94"); context.fillRect(x - 18, centerY + 27, 36, 5); });
+        context.fillStyle = paint("#9fa3b5"); context.textAlign = "center"; context.font = "11px monospace"; context.fillText("token embedding + position signal", box.width / 2, headerY);
       } else if (stage === 2) {
-        for (let query = 0; query < tokens.length; query += 1) for (let key = 0; key <= query; key += 1) { const strength = key === query ? 0.85 : 0.18 + ((query * 7 + key * 3) % 7) / 18; context.strokeStyle = `rgba(${key === query ? "144,217,193" : "177,154,255"},${strength})`; context.lineWidth = key === query ? 1.8 : 0.8; context.beginPath(); context.moveTo(leftX + 13, nodeY(key)); context.lineTo(rightX - 13, nodeY(query)); context.stroke(); if (!reducedMotion && (query + key) % 2 === 0) { const progress = (time / 1500 + query * 0.19 + key * 0.11) % 1; particle(leftX + 13 + (rightX - leftX - 26) * progress, nodeY(key) + (nodeY(query) - nodeY(key)) * progress, key === query ? "#f3ba94" : "#b19aff", key === query ? 2.5 : 1.7); } }
-        tokens.forEach((token, index) => { [[leftX, "#90d9c1"], [rightX, "#f3ba94"]].forEach(([x, color]) => { particle(x as number, nodeY(index), color as string, 11); context.fillStyle = "#11131a"; context.font = "9px monospace"; context.textAlign = "center"; context.fillText(String(index + 1).padStart(2, "0"), x as number, nodeY(index) + 3); context.fillStyle = color as string; context.textAlign = x === leftX ? "right" : "left"; context.fillText(token, (x as number) + (x === leftX ? -16 : 16), nodeY(index) + 3); }); });
-        context.fillStyle = "#d7c6ff"; context.textAlign = "center"; context.font = "11px monospace"; context.fillText("each query mixes earlier token values", box.width / 2, headerY);
+        for (let query = 0; query < tokens.length; query += 1) for (let key = 0; key <= query; key += 1) { const strength = key === query ? 0.85 : 0.18 + ((query * 7 + key * 3) % 7) / 18; context.strokeStyle = `rgba(${key === query ? "144,217,193" : "177,154,255"},${strength})`; context.lineWidth = key === query ? 1.8 : 0.8; context.beginPath(); context.moveTo(leftX + 13, nodeY(key)); context.lineTo(rightX - 13, nodeY(query)); context.stroke(); if (!reducedMotion && (query + key) % 2 === 0) { const progress = (time / 1500 + query * 0.19 + key * 0.11) % 1; particle(leftX + 13 + (rightX - leftX - 26) * progress, nodeY(key) + (nodeY(query) - nodeY(key)) * progress, key === query ? paint("#f3ba94") : paint("#b19aff"), key === query ? 2.5 : 1.7); } }
+        tokens.forEach((token, index) => { [[leftX, paint("#90d9c1")], [rightX, paint("#f3ba94")]].forEach(([x, color]) => { particle(x as number, nodeY(index), color as string, 11); context.fillStyle = paint("#11131a"); context.font = "9px monospace"; context.textAlign = "center"; context.fillText(String(index + 1).padStart(2, "0"), x as number, nodeY(index) + 3); context.fillStyle = color as string; context.textAlign = x === leftX ? "right" : "left"; context.fillText(token, (x as number) + (x === leftX ? -16 : 16), nodeY(index) + 3); }); });
+        context.fillStyle = paint("#d7c6ff"); context.textAlign = "center"; context.font = "11px monospace"; context.fillText("each query mixes earlier token values", box.width / 2, headerY);
       } else if (stage === 3) {
         const columns = [box.width * 0.25, box.width * 0.5, box.width * 0.75]; const counts = [4, 7, 4];
-        columns.forEach((x, column) => { for (let node = 0; node < counts[column]; node += 1) { const y = centerY + (node - (counts[column] - 1) / 2) * 24; if (column > 0) for (let prior = 0; prior < counts[column - 1]; prior += 1) { const priorY = centerY + (prior - (counts[column - 1] - 1) / 2) * 24; context.strokeStyle = "rgba(139,175,251,.18)"; context.lineWidth = .7; context.beginPath(); context.moveTo(columns[column - 1] + 6, priorY); context.lineTo(x - 6, y); context.stroke(); if (!reducedMotion && (node + prior + column) % 3 === 0) { const flow = (time / 1150 + node * .16 + prior * .09) % 1; particle(columns[column - 1] + 6 + (x - columns[column - 1] - 12) * flow, priorY + (y - priorY) * flow, column === 1 ? "#f3ba94" : "#90d9c1", 2.2); } } const pulse = column === 1 && !reducedMotion ? 5.5 + Math.sin(time / 260 + node) * 1.6 : 6; particle(x, y, column === 1 ? "#b19aff" : "#90d9c1", pulse); } });
-        context.fillStyle = "#9fa3b5"; context.textAlign = "center"; context.font = "11px monospace"; context.fillText("MLP expands features, applies non-linearity, then projects back", box.width / 2, headerY);
+        columns.forEach((x, column) => { for (let node = 0; node < counts[column]; node += 1) { const y = centerY + (node - (counts[column] - 1) / 2) * 24; if (column > 0) for (let prior = 0; prior < counts[column - 1]; prior += 1) { const priorY = centerY + (prior - (counts[column - 1] - 1) / 2) * 24; context.strokeStyle = "rgba(139,175,251,.18)"; context.lineWidth = .7; context.beginPath(); context.moveTo(columns[column - 1] + 6, priorY); context.lineTo(x - 6, y); context.stroke(); if (!reducedMotion && (node + prior + column) % 3 === 0) { const flow = (time / 1150 + node * .16 + prior * .09) % 1; particle(columns[column - 1] + 6 + (x - columns[column - 1] - 12) * flow, priorY + (y - priorY) * flow, column === 1 ? paint("#f3ba94") : paint("#90d9c1"), 2.2); } } const pulse = column === 1 && !reducedMotion ? 5.5 + Math.sin(time / 260 + node) * 1.6 : 6; particle(x, y, column === 1 ? paint("#b19aff") : paint("#90d9c1"), pulse); } });
+        context.fillStyle = paint("#9fa3b5"); context.textAlign = "center"; context.font = "11px monospace"; context.fillText("MLP expands features, applies non-linearity, then projects back", box.width / 2, headerY);
       } else if (stage === 4) {
-        const ranked = [...candidates].sort((left, right) => right.logit - left.logit); const maxLogit = ranked[0]?.logit ?? 1; ranked.forEach((candidate, index) => { const x = box.width * .28; const y = 76 + index * 29; const width = Math.max(26, (candidate.logit / maxLogit) * box.width * .36); context.fillStyle = index === 0 ? "#f3ba94" : "#8baffb"; context.fillRect(x, y, width, 15); context.fillStyle = "#e6e4ec"; context.textAlign = "right"; context.font = "10px monospace"; context.fillText(candidate.token, x - 10, y + 11); context.fillStyle = "#9fa3b5"; context.textAlign = "left"; context.fillText(candidate.logit.toFixed(1), x + width + 8, y + 11); });
-        context.fillStyle = "#9fa3b5"; context.textAlign = "center"; context.font = "11px monospace"; context.fillText("final hidden state → vocabulary logits", box.width / 2, headerY);
+        const ranked = [...candidates].sort((left, right) => right.logit - left.logit); const maxLogit = ranked[0]?.logit ?? 1; ranked.forEach((candidate, index) => { const x = box.width * .28; const y = 76 + index * 29; const width = Math.max(26, (candidate.logit / maxLogit) * box.width * .36); context.fillStyle = index === 0 ? paint("#f3ba94") : paint("#8baffb"); context.fillRect(x, y, width, 15); context.fillStyle = paint("#e6e4ec"); context.textAlign = "right"; context.font = "10px monospace"; context.fillText(candidate.token, x - 10, y + 11); context.fillStyle = paint("#9fa3b5"); context.textAlign = "left"; context.fillText(candidate.logit.toFixed(1), x + width + 8, y + 11); });
+        context.fillStyle = paint("#9fa3b5"); context.textAlign = "center"; context.font = "11px monospace"; context.fillText("final hidden state → vocabulary logits", box.width / 2, headerY);
       } else {
-        const ranked = [...candidates].sort((left, right) => right.probability - left.probability).slice(0, 3); ranked.forEach((candidate, index) => { const x = box.width * .23 + index * box.width * .22; const height = candidate.probability * 105; context.fillStyle = index === 0 ? "#90d9c1" : "#b19aff"; context.fillRect(x, centerY + 50 - height, 58, height); context.fillStyle = "#e6e4ec"; context.font = "10px monospace"; context.textAlign = "center"; context.fillText(candidate.token, x + 29, centerY + 69); context.fillText(`${Math.round(candidate.probability * 100)}%`, x + 29, centerY + 42 - height); });
-        context.fillStyle = "#9fa3b5"; context.textAlign = "center"; context.font = "11px monospace"; context.fillText("softmax distribution → sampled next token", box.width / 2, headerY);
+        const ranked = [...candidates].sort((left, right) => right.probability - left.probability).slice(0, 3); ranked.forEach((candidate, index) => { const x = box.width * .23 + index * box.width * .22; const height = candidate.probability * 105; context.fillStyle = index === 0 ? paint("#90d9c1") : paint("#b19aff"); context.fillRect(x, centerY + 50 - height, 58, height); context.fillStyle = paint("#e6e4ec"); context.font = "10px monospace"; context.textAlign = "center"; context.fillText(candidate.token, x + 29, centerY + 69); context.fillText(`${Math.round(candidate.probability * 100)}%`, x + 29, centerY + 42 - height); });
+        context.fillStyle = paint("#9fa3b5"); context.textAlign = "center"; context.font = "11px monospace"; context.fillText("softmax distribution → sampled next token", box.width / 2, headerY);
       }
       if (!reducedMotion) frame = requestAnimationFrame(draw);
     };
     draw(); const observer = new ResizeObserver(() => draw()); observer.observe(element); return () => { observer.disconnect(); cancelAnimationFrame(frame); };
-  }, [stage, tokens, candidates]);
+  }, [stage, tokens, candidates, theme]);
   return <canvas ref={canvas} className="inference-canvas" aria-label={`Inference pipeline, stage ${stage + 1}: ${stages[stage][0]}`} role="img" />;
 }
 

@@ -6,6 +6,13 @@
     <meta name="theme-color" content="#0c0d12" />
     <meta name="description" content="An interactive, private-by-design LLM learning studio. Explore tokens, context windows, tool calls, and prompt engineering. No API keys, no backend." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Apply the saved (or system) theme before first paint to avoid a flash.
+      try { var t = JSON.parse(localStorage.getItem('context-lab-theme')); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      document.documentElement.dataset.theme = t;
+      document.querySelector('meta[name=theme-color]').content = t === 'light' ? '#fcfdfe' : '#0c0d12';
+    </script>
     <title>Context Lab — A little context changes everything.</title>
   </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>

@@ -10,6 +10,26 @@ export function usePersistentState<T>(key: string, initial: T, validator?: (valu
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Private mode or storage quota: app remains usable in memory. */ } }, [key, value]);
   return [value, setValue] as const;
 }
+export type Theme = 'light' | 'dark';
+const currentTheme = (): Theme => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+/** Reads the active theme and re-renders when it changes (for canvas/inline colors). */
+export function useThemeValue() {
+  const [theme, setTheme] = useState<Theme>(currentTheme);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTheme(currentTheme()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return theme;
+}
+export function useTheme() {
+  const [theme, setTheme] = usePersistentState<Theme>('context-lab-theme', currentTheme(), (v): v is Theme => v === 'light' || v === 'dark');
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name=theme-color]')?.setAttribute('content', theme === 'light' ? '#fcfdfe' : '#0c0d12');
+  }, [theme]);
+  return [theme, () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))] as const;
+}
 export function IconButton({ icon: Icon, children, className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { icon: LucideIcon; children?: ReactNode }) {
   return <button type="button" className={`${children ? 'btn' : 'icon-btn'} ${className}`} {...props}><Icon size={16} strokeWidth={1.7} aria-hidden="true" />{children}</button>;
 }

@@ -52,6 +52,8 @@ import {
   X,
   Zap,
   Hash,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { ContextLabView, FlowLabView } from "./ContextFlowLabs";
 import { PricingSources, PricingTable } from "./PricingReference";
@@ -81,6 +83,7 @@ import { ModelChart } from "./ModelChart";
 import type { FlowEntry } from "./logic";
 import {
   IconButton,
+  useTheme,
   SectionLabel,
   TooltipNote,
   usePersistentState,
@@ -232,6 +235,7 @@ export default function App() {
   );
   const [guide, setGuide] = useState(false);
   const [present, setPresent] = useState(false);
+  const [theme, toggleTheme] = useTheme();
   const [slopMode, setSlopMode] = useState(false);
   const brandClicks = useRef(0);
   const slopModeActivatedAt = useRef(0);
@@ -407,6 +411,12 @@ export default function App() {
             >
               {present ? "Exit focus" : "Present"}
             </IconButton>
+            <IconButton
+              icon={theme === "light" ? Moon : Sun}
+              aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+              title={theme === "light" ? "Dark mode" : "Light mode"}
+              onClick={toggleTheme}
+            />
             <IconButton
               icon={CircleHelp}
               aria-label="Open field guide"

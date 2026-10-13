@@ -337,7 +337,7 @@ export function ContextLabView() {
                 cy="160"
                 r="142"
                 fill="none"
-                stroke="#292a37"
+                stroke="light-dark(#eceefe, #292a37)"
                 strokeWidth="1"
                 strokeDasharray="2 7"
               />
@@ -346,7 +346,7 @@ export function ContextLabView() {
                 cy="160"
                 r="116"
                 fill="none"
-                stroke="#21222d"
+                stroke="light-dark(#f4f4fc, #21222d)"
                 strokeWidth="36"
               />
               {all.map((item) => {
@@ -387,7 +387,7 @@ export function ContextLabView() {
                 cy="160"
                 r="87"
                 fill="none"
-                stroke="#292a37"
+                stroke="light-dark(#eceefe, #292a37)"
                 strokeWidth="1"
               />
             </svg>
@@ -505,6 +505,8 @@ export function ContextLabView() {
                       style={
                         {
                           accentColor: contextColors[item.key],
+                          "--range": contextColors[item.key],
+                          "--fill": `${(item.tokens / Math.max(1, capacity - reservedBuffer - used + item.tokens)) * 100}%`,
                         } as CSSProperties
                       }
                       onFocus={() => setFocused(item.key)}

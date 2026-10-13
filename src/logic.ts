@@ -106,7 +106,7 @@ export const contextPreset: ContextAllocations = {
   customAgents: 281,
 };
 export const contextColors: Record<ContextAllocationKey | 'freeSpace' | 'reservedBuffer', string> = {
-  systemPrompt: '#46c289', systemTools: '#8baffb', memoryFiles: '#e4b342', skills: '#dc5c9a', mcpTools: '#ed7644', conversationHistory: '#a7a69f', toolResults: '#d3743a', customAgents: '#b19aff', freeSpace: '#292a37',
+  systemPrompt: '#46c289', systemTools: '#8baffb', memoryFiles: '#e4b342', skills: '#dc5c9a', mcpTools: '#ed7644', conversationHistory: '#a7a69f', toolResults: '#d3743a', customAgents: '#b19aff', freeSpace: 'light-dark(#e6e8f4, #292a37)',
   reservedBuffer: '#858796',
 };
 export const allocationTotal = (amounts: ContextAllocations): number => contextAllocationKeys.reduce((total, key) => total + amounts[key], 0);
