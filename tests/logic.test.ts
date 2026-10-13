@@ -54,9 +54,13 @@ describe('Token estimates and counters', () => {
     const ratio = (text: string) => countClaude5Tokens(text) / countClaudeTokens(text);
     assert.ok(ratio(samples.prose) >= 1.15 && ratio(samples.prose) <= 1.35, `prose ${ratio(samples.prose)}`);
     assert.ok(ratio(samples.code) >= 1.3 && ratio(samples.code) <= 1.5, `code ${ratio(samples.code)}`);
+    assert.ok(ratio(samples.python) >= 1.15 && ratio(samples.python) <= 1.5, `python ${ratio(samples.python)}`);
     assert.ok(ratio(samples.multilingual) >= 1.05 && ratio(samples.multilingual) <= 1.4, `multilingual ${ratio(samples.multilingual)}`);
     const all = Object.values(samples).join('\n');
     assert.ok(ratio(all) >= 1.15 && ratio(all) <= 1.35, `all ${ratio(all)}`);
+  });
+  it('keeps the Python sample cheaper than the equivalent TypeScript sample', () => {
+    for (const count of [countClaudeTokens, countClaude5Tokens, countOpenAITokens]) assert.ok(count(samples.python) < count(samples.code));
   });
   it('exposes exact OpenAI token IDs for the o200k_base visualization', () => {
     const text = 'Hello, world!';

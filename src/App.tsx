@@ -578,43 +578,53 @@ function Tokenizer() {
               </div>
             </div>
           </div>
+          <div className="sample-toolbar">
+            <span>Start with a sample</span>
+            <div className="sample-buttons">
+              <IconButton
+                icon={FileText}
+                className={`btn-small btn-ghost ${sample === "prose" && text === samples.prose ? "chosen" : ""}`}
+                onClick={() => {
+                  setText(samples.prose);
+                  setSample("prose");
+                }}
+              >
+                Prose
+              </IconButton>
+              <IconButton
+                icon={Code2}
+                className={`btn-small btn-ghost ${sample === "code" && text === samples.code ? "chosen" : ""}`}
+                onClick={() => {
+                  setText(samples.code);
+                  setSample("code");
+                }}
+              >
+                TypeScript
+              </IconButton>
+              <IconButton
+                icon={Code2}
+                className={`btn-small btn-ghost ${sample === "python" && text === samples.python ? "chosen" : ""}`}
+                onClick={() => {
+                  setText(samples.python);
+                  setSample("python");
+                }}
+              >
+                Python
+              </IconButton>
+              <IconButton
+                icon={Globe2}
+                className={`btn-small btn-ghost ${sample === "multilingual" && text === samples.multilingual ? "chosen" : ""}`}
+                onClick={() => {
+                  setText(samples.multilingual);
+                  setSample("multilingual");
+                }}
+              >
+                Multilingual
+              </IconButton>
+            </div>
+          </div>
           {inputView === "text" ? (
             <>
-              <div className="sample-toolbar">
-                <span>Start with a sample</span>
-                <div className="sample-buttons">
-                  <IconButton
-                    icon={FileText}
-                    className={`btn-small btn-ghost ${sample === "prose" && text === samples.prose ? "chosen" : ""}`}
-                    onClick={() => {
-                      setText(samples.prose);
-                      setSample("prose");
-                    }}
-                  >
-                    Prose
-                  </IconButton>
-                  <IconButton
-                    icon={Code2}
-                    className={`btn-small btn-ghost ${sample === "code" && text === samples.code ? "chosen" : ""}`}
-                    onClick={() => {
-                      setText(samples.code);
-                      setSample("code");
-                    }}
-                  >
-                    Code
-                  </IconButton>
-                  <IconButton
-                    icon={Globe2}
-                    className={`btn-small btn-ghost ${sample === "multilingual" && text === samples.multilingual ? "chosen" : ""}`}
-                    onClick={() => {
-                      setText(samples.multilingual);
-                      setSample("multilingual");
-                    }}
-                  >
-                    Multilingual
-                  </IconButton>
-                </div>
-              </div>
               <div className="text-editor">
                 <span className="editor-gutter" aria-hidden="true">
                   01
