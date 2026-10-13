@@ -91,10 +91,10 @@ try {
   check('New session preserves only boot context', 'document.querySelector(".retention-meter").getAttribute("aria-valuenow")==="18800"');
   activate('.call-list > div:nth-child(5) .call-button'); settle();
   activate('.call-list > div:nth-child(5) .call-button'); settle();
-  check('Conversation retains randomized output and caches older rounds', '(() => { const used=+document.querySelector(".retention-meter").getAttribute("aria-valuenow"); const timeline=document.querySelector(".flow-timeline").textContent; return used>=24000 && used<=26000 && document.querySelectorAll(".retained-tag.is-cached").length===1 && timeline.includes("round 2") && timeline.includes("600 input +") && timeline.includes("assistant output"); })()');
+  check('Conversation retains fixed-size output and caches older rounds', '(() => { const used=+document.querySelector(".retention-meter").getAttribute("aria-valuenow"); const timeline=document.querySelector(".flow-timeline").textContent; return used===30800 && document.querySelectorAll(".retained-tag.is-cached").length===1 && timeline.includes("round 2") && timeline.includes("2,000 input +") && timeline.includes("assistant output"); })()');
   button('New session'); snapshot(); button('Clear');
   activate('.call-list > div:nth-child(6) .call-button'); settle();
-  check('Image attachment retains visual tokens alongside text and output', '(() => { const used=+document.querySelector(".retention-meter").getAttribute("aria-valuenow"); const timeline=document.querySelector(".flow-timeline").textContent; return used>=22960 && used<=23960 && timeline.includes("Attach image") && timeline.includes("1,560 image visual tokens"); })()');
+  check('Image attachment retains visual tokens alongside text and output', '(() => { const used=+document.querySelector(".retention-meter").getAttribute("aria-valuenow"); const timeline=document.querySelector(".flow-timeline").textContent; return used===26360 && timeline.includes("Attach image") && timeline.includes("1,560 image visual tokens"); })()');
   button('New session'); snapshot(); button('Clear');
   check('Long-conversation emulation is hidden in the 64K window', '!document.querySelector(".emulate-button")');
   activate('.flow-capacity-switch button:last-child');

@@ -16,7 +16,6 @@ import {
   Gauge,
   History,
   Image,
-  Info,
   Layers3,
   Lightbulb,
   LockKeyhole,
@@ -27,6 +26,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Terminal,
+  TimerOff,
   WandSparkles,
   Workflow,
 } from "lucide-react";
@@ -42,7 +42,6 @@ import {
   conversationImageTokens,
   conversationInputTokens,
   conversationOutputTokens,
-  conversationReasoningMaxTokens,
   conversationReasoningTokens,
   emulateLongConversation,
   emulatedConversationTurns,
@@ -56,12 +55,11 @@ import {
   formatNumber,
   hasLoadedMcpSchema,
   modelPriceOptions,
-  priceAt,
   retainCall,
   retainConversation,
-  requestCost,
   reservedContextBuffer,
-  sessionSpend,
+  cacheWriteMultiplier,
+  turnCosts,
 } from "./logic";
 import type {
   ContextAllocationKey,
@@ -69,6 +67,7 @@ import type {
   ContextCapacity,
   FlowCapacity,
   FlowEntry,
+  TurnCost,
 } from "./logic";
 import {
   IconButton,
@@ -181,6 +180,68 @@ type ContextFocus = ContextAllocationKey | "freeSpace" | "reservedBuffer" | null
 const isContextCapacity = (value: unknown): value is ContextCapacity =>
   typeof value === "number" &&
   contextCapacityOptions.includes(value as ContextCapacity);
+
+
+// Cache writes show the base input rate and the write multiplier (1.25x for the 5-minute TTL) separately.
+const writeRateLabel = (turn: TurnCost) => `$${turn.price.input.toFixed(2)}/M × ${cacheWriteMultiplier}`;
+
+// Two small column charts: what each request costs (cached context vs new tokens), and the
+// context re-read on its own scale so the snowball is visible even when output dominates.
+function TurnCostChart({ turns, cachedLabel }: { turns: TurnCost[]; cachedLabel: string }) {
+  if (turns.length < 2) return null;
+  const hits = turns.filter((turn) => !turn.miss);
+  const first = hits[0] ?? turns[0];
+  const last = hits[hits.length - 1] ?? turns[turns.length - 1];
+  const maxTotal = Math.max(...turns.map((turn) => turn.total));
+  const maxReread = Math.max(...turns.map((turn) => turn.reread));
+  const growth = first.reread > 0 ? last.reread / first.reread : 0;
+  const money = (value: number) => `$${value.toFixed(value < 0.1 ? 4 : 2)}`;
+  return (
+    <div className="turn-chart">
+      <div className="turn-chart-panel">
+        <div className="turn-chart-head">
+          <strong>Cost of each request</strong>
+          <span>{money(first.total)} → {money(last.total)}</span>
+        </div>
+        <div className="turn-chart-bars">
+          {turns.map((turn, index) => (
+            <span
+              key={index}
+              title={`Request ${index + 1}: ${money(turn.total)} = ${money(turn.reread)} ${cachedLabel.toLowerCase()} context + ${money(turn.write + turn.output)} caching new input + output`}
+            >
+              <i className={turn.miss ? "seg-miss" : "seg-cached"} style={{ height: `${(turn.reread / maxTotal) * 100}%` }} />
+              <i className="seg-new" style={{ height: `${((turn.write + turn.output) / maxTotal) * 100}%` }} />
+            </span>
+          ))}
+        </div>
+        <div className="turn-chart-legend">
+          <span className="seg-cached">{cachedLabel} context</span>
+          <span className="seg-new">caching + output</span>
+          {turns.some((turn) => turn.miss) && <span className="seg-miss">cache miss</span>}
+        </div>
+      </div>
+      <div className="turn-chart-panel">
+        <div className="turn-chart-head">
+          <strong>{cachedLabel} context alone</strong>
+          <span>
+            {money(first.reread)} → {money(last.reread)}
+            {growth > 0 && <b> ×{growth.toFixed(growth < 10 ? 1 : 0)}</b>}
+          </span>
+        </div>
+        <div className="turn-chart-bars">
+          {turns.map((turn, index) => (
+            <span key={index} title={`Request ${index + 1}: ${money(turn.reread)} for ${compact(turn.contextTokens)} tokens resent`}>
+              <i className={turn.miss ? "seg-miss" : "seg-cached"} style={{ height: `${(turn.reread / maxReread) * 100}%` }} />
+            </span>
+          ))}
+        </div>
+        <div className="turn-chart-legend">
+          <span>own scale: every turn resends everything before it</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function ContextLabView() {
   const [capacity, setCapacity] = usePersistentState<ContextCapacity>(
@@ -526,7 +587,7 @@ const callTypes = [
     id: "message",
     kind: "message" as const,
     name: "Continue conversation",
-    detail: "600 input + 2-3K output + 0.8-1.6K thinking",
+    detail: `${conversationInputTokens / 1000}K input + ${conversationOutputTokens / 1000}K output + ${conversationReasoningTokens / 1000}K thinking`,
     resultTokens: 0,
     inputTokens: conversationInputTokens,
     icon: MessageSquare,
@@ -536,7 +597,7 @@ const callTypes = [
     id: "image",
     kind: "message" as const,
     name: "Attach image",
-    detail: "600 text + 1.56K image + 2-3K output + 0.8-1.6K thinking",
+    detail: `${conversationInputTokens / 1000}K text + 1.56K image + ${conversationOutputTokens / 1000}K output + ${conversationReasoningTokens / 1000}K thinking`,
     resultTokens: 0,
     inputTokens: conversationImageInputTokens,
     imageTokens: conversationImageTokens,
@@ -704,11 +765,10 @@ export function FlowLabView() {
     isFlowCapacity,
   );
   const [pending, setPending] = useState<string | null>(null);
-  const [notice, setNotice] = useState(
-    "This session starts with system, deferred-MCP, and skill-header context.",
-  );
   const [resetConfirm, setResetConfirm] = useState(false);
   const [showRequestCost, setShowRequestCost] = useState(false);
+  // When set, the next request misses the prompt cache and re-reads the context at the full input rate.
+  const [cacheExpired, setCacheExpired] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   const [showRates, setShowRates] = useState(false);
   const [autoScroll, setAutoScroll] = usePersistentState(
@@ -786,50 +846,58 @@ export function FlowLabView() {
   const selectedModel =
     modelPriceOptions.find((option) => option.id === modelOptionId) ??
     modelPriceOptions[0];
-  const currentPrice = priceAt(selectedModel.pricing, used);
-  const cachedInputTokens = useCachedInputRate ? used : 0;
-  const pricedInputTokens = used - cachedInputTokens;
-  const nextOutputTokens = 2500;
-  const nextRequestCost = (retainedTokens: number) =>
-    requestCost(
-      useCachedInputRate ? 0 : retainedTokens,
-      useCachedInputRate ? retainedTokens : 0,
-      nextOutputTokens,
-      priceAt(selectedModel.pricing, retainedTokens),
-      useCachedInputRate,
-    );
-  const estimatedNextRequestCost = nextRequestCost(used);
-  const spend = sessionSpend(entries, nextRequestCost);
+  const nextOutputTokens = conversationOutputTokens;
+  const nextReasoningTokens = simulateReasoning ? conversationReasoningTokens : 0;
+  // The next request, priced as a hypothetical conversation turn appended to the session.
+  const nextTurn = turnCosts(
+    [
+      ...entries,
+      {
+        id: -1,
+        kind: "message",
+        name: "Next request",
+        tokens: conversationInputTokens + nextOutputTokens + nextReasoningTokens,
+        originalTokens: conversationInputTokens + nextOutputTokens + nextReasoningTokens,
+        summarized: false,
+        inputTokens: conversationInputTokens,
+        outputTokens: nextOutputTokens,
+        reasoningTokens: nextReasoningTokens || undefined,
+        cacheMiss: cacheExpired || undefined,
+      },
+    ],
+    selectedModel.pricing,
+    useCachedInputRate,
+  ).at(-1)!;
+  const estimatedNextRequestCost = nextTurn.total;
+  const turns = turnCosts(entries, selectedModel.pricing, useCachedInputRate);
+  const spend = { requests: turns.length, total: turns.at(-1)?.cumulative ?? 0 };
   useEffect(() => {
     if (used > capacity) setCapacity(flowMaxCapacity);
   }, [used, capacity, setCapacity]);
-  // Rough per-turn growth used for the button estimate; the real run is randomized.
+  // Per-turn growth for the button estimate; tools and skills are skipped on the final turn.
   const emulationEstimate =
     emulatedConversationTurns *
-      (conversationInputTokens + 2500 + (simulateReasoning ? 1200 : 0)) +
-    (emulatedConversationTurns / 5) * 1700 +
-    (emulatedConversationTurns / 10) * 1350;
+      (conversationInputTokens + conversationOutputTokens + (simulateReasoning ? conversationReasoningTokens : 0)) +
+    Math.floor((emulatedConversationTurns - 1) / 5) * 1700 +
+    Math.floor((emulatedConversationTurns - 1) / 10) * 1350;
   function emulate() {
     if (pending) return;
     setPending("emulate");
-    setNotice(`Fast-forwarding ${emulatedConversationTurns} turns...`);
     timer.current = setTimeout(() => {
-      const before = used;
-      const firstRequest = nextRequestCost(flowBase);
       const result = emulateLongConversation(entries, {
         capacity,
         reasoning: simulateReasoning,
       });
-      setEntries(result.entries);
+      setEntries(
+        cacheExpired
+          ? result.entries.map((entry, index) =>
+              index === entries.length ? { ...entry, cacheMiss: true } : entry,
+            )
+          : result.entries,
+      );
+      setCacheExpired(false);
       setPending(null);
       setShowRequestCost(true);
-      const after = flowUsed(result.entries);
-      const total = sessionSpend(result.entries, nextRequestCost).total;
-      setNotice(
-        result.turns === 0
-          ? "Not enough context for another emulated turn. Compact or start a fresh session."
-          : `Emulated ${result.turns} turns${result.turns < emulatedConversationTurns ? " (context full)" : ""}: context ${compact(before)} -> ${compact(after)}. Next request $${nextRequestCost(after).toFixed(4)} vs $${firstRequest.toFixed(4)} on a fresh session; session spend $${total.toFixed(2)}.`,
-      );
     }, 700);
   }
   function addedTokens(
@@ -837,8 +905,8 @@ export function FlowLabView() {
     assistantOutputTokens?: number,
   ) {
     if (call.kind === "message") {
-      return call.inputTokens + (assistantOutputTokens ?? 2500) +
-        (simulateReasoning ? conversationReasoningMaxTokens : 0);
+      return call.inputTokens + (assistantOutputTokens ?? nextOutputTokens) +
+        (simulateReasoning ? conversationReasoningTokens : 0);
     }
     return call.kind === "mcp" && !hasLoadedMcpSchema(entries, call.id)
       ? call.resultTokens + call.schemaTokens
@@ -847,24 +915,14 @@ export function FlowLabView() {
   function trigger(call: (typeof callTypes)[number]) {
     if (pending) return;
     const assistantOutputTokens =
-      call.kind === "message" ? conversationOutputTokens() : undefined;
+      call.kind === "message" ? conversationOutputTokens : undefined;
     const reasoningTokens =
       call.kind === "message" && simulateReasoning
-        ? conversationReasoningTokens()
+        ? conversationReasoningTokens
         : 0;
     const incoming = addedTokens(call, assistantOutputTokens);
-    if (used + incoming > capacity) {
-      setNotice(
-        "Not enough context. Compact retained results or start a fresh session.",
-      );
-      return;
-    }
+    if (used + incoming > capacity) return;
     setPending(call.id);
-    setNotice(
-      call.kind === "mcp" && !hasLoadedMcpSchema(entries, call.id)
-        ? `Loading ${call.name.toLowerCase()} schema, then running it...`
-        : `Simulating ${call.name.toLowerCase()}...`,
-    );
     timer.current = setTimeout(() => {
       setEntries((current) => {
         let next = current;
@@ -904,17 +962,14 @@ export function FlowLabView() {
           imageTokens: call.kind === "message" ? call.imageTokens : undefined,
           outputTokens: assistantOutputTokens,
           reasoningTokens: reasoningTokens || undefined,
+          cacheMiss: cacheExpired || undefined,
         };
         return call.kind === "message"
           ? (retainConversation(next, result, capacity) ?? next)
           : (retainCall(next, result, capacity) ?? next);
       });
+      setCacheExpired(false);
       setPending(null);
-      setNotice(
-        call.kind === "message"
-          ? `${call.name}: ${call.imageTokens ? `${formatNumber(conversationInputTokens)} text + ${formatNumber(call.imageTokens)} image` : formatNumber(call.inputTokens)} input + ${formatNumber(assistantOutputTokens!)} assistant output${reasoningTokens ? ` + ${formatNumber(reasoningTokens)} reasoning output` : ""} tokens retained in this session.`
-          : `${call.name}: ${formatNumber(incoming)} tokens added${call.kind === "mcp" && incoming > call.resultTokens ? " for schema + result" : " and retained"} in this session.`,
-      );
     }, 700);
   }
   return (
@@ -1066,11 +1121,11 @@ export function FlowLabView() {
                     Use cached-context rate
                   </button>
                   <div className="flow-price-breakdown">
-                    <span>{formatNumber(pricedInputTokens)} uncached at ${currentPrice.input.toFixed(2)}/1M</span>
-                    <span>{formatNumber(cachedInputTokens)} cached at ${(useCachedInputRate ? currentPrice.cachedInput : currentPrice.input).toFixed(2)}/1M</span>
-                    <span>{formatNumber(nextOutputTokens)} output at ${currentPrice.output.toFixed(2)}/1M</span>
+                    <span>{formatNumber(nextTurn.contextTokens)} {nextTurn.miss ? "cached after miss" : useCachedInputRate ? "cache read" : "uncached"} at {nextTurn.miss ? writeRateLabel(nextTurn) : `$${nextTurn.readRate.toFixed(2)}/1M`}</span>
+                    <span>{formatNumber(nextTurn.writeTokens)} {useCachedInputRate ? "caching new input" : "new input"} at {useCachedInputRate ? writeRateLabel(nextTurn) : `$${nextTurn.writeRate.toFixed(2)}/1M`}</span>
+                    <span>{formatNumber(nextTurn.generatedTokens)} output at ${nextTurn.price.output.toFixed(2)}/1M</span>
                   </div>
-                  <p>Estimate for the retained session sent again with a 2.5K-token next response. It is a list-price illustration, not a provider invoice.</p>
+                  <p>Estimate for the next request: the retained session read from cache, the previous answer and new input cached at 1.25x, and a {compact(nextOutputTokens)}-token response. It is a list-price illustration, not a provider invoice.</p>
                 </div>
                 <div className="flow-pricing-reference">
                   <IconButton
@@ -1214,7 +1269,7 @@ export function FlowLabView() {
                           className={`flow-cache-switch reasoning-switch ${simulateReasoning ? "is-on" : ""}`}
                           role="switch"
                           aria-checked={simulateReasoning}
-                          title="Add a random 800-1,600 internal thinking tokens to each new conversation response"
+                          title={`Add ${formatNumber(conversationReasoningTokens)} internal thinking tokens to each new conversation response`}
                           onClick={() => setSimulateReasoning((value) => !value)}
                         >
                           <span className="flow-switch-track" aria-hidden="true"><span /></span>
@@ -1259,7 +1314,7 @@ export function FlowLabView() {
               <button
                 type="button"
                 className={`call-button emulate-button ${pending === "emulate" ? "pending" : ""}`}
-                disabled={!!pending || used + conversationInputTokens + 3000 > capacity}
+                disabled={!!pending || used + conversationInputTokens + conversationOutputTokens > capacity}
                 onClick={emulate}
                 title="Fast-forward a long session to see how request cost grows when every turn resends the retained context."
               >
@@ -1285,14 +1340,24 @@ export function FlowLabView() {
                 !!pending || !entries.some((entry) => !entry.summarized)
               }
               onClick={() => {
-                const next = compactEntries(entries);
-                setEntries(next);
-                setNotice(
-                  `Compacted retained entries: ${formatNumber(used - flowUsed(next))} tokens freed. Summaries keep only 25% of their original size; session spend restarts from the summary.`,
-                );
+                setEntries(compactEntries(entries));
               }}
             >
               Compact session
+            </IconButton>
+            <IconButton
+              icon={TimerOff}
+              className={`btn-ghost btn-small cache-expire-btn ${cacheExpired ? "is-on" : ""}`}
+              disabled={!!pending || !useCachedInputRate}
+              aria-pressed={cacheExpired}
+              title={
+                useCachedInputRate
+                  ? "Simulate the prompt cache expiring (idle gap, or an edited system prompt or tool list). The next request re-reads the whole context at the full input rate instead of the cached rate."
+                  : "Cached pricing is off, so every request is already priced as a miss."
+              }
+              onClick={() => setCacheExpired((value) => !value)}
+            >
+              {cacheExpired ? "Cache expired: next request misses" : "Expire cache"}
             </IconButton>
             <IconButton
               icon={RotateCcw}
@@ -1311,8 +1376,8 @@ export function FlowLabView() {
                 className="btn-small"
                 onClick={() => {
                   setEntries([]);
+                  setCacheExpired(false);
                   setResetConfirm(false);
-                  setNotice("Fresh session. Only boot context remains.");
                 }}
               >
                 Clear
@@ -1359,6 +1424,10 @@ export function FlowLabView() {
               <span>Stays in context</span>
             </div>
           </div>
+          <TurnCostChart
+            turns={turns}
+            cachedLabel={useCachedInputRate ? "Cached" : "Re-read"}
+          />
           <div className="flow-timeline" ref={timelineRef}>
             <div className="timeline-entry baseline-entry">
               <span className="timeline-dot" />
@@ -1371,39 +1440,30 @@ export function FlowLabView() {
                 <p>Claude Code observation plus explicit simulator estimates</p>
               </div>
               <span className="mono">{compact(flowBase)}</span>
-            </div>
-            <div className="flow-boot-list">
-              {flowBootEntries.map((entry) => (
-                <TimelineSectionTooltip
-                  key={entry.id}
-                  className={`flow-boot-entry boot-${entry.kind}`}
-                  label={
-                    entry.kind === "mcp-catalog"
-                      ? "Deferred MCP catalog: lightweight metadata that advertises connected MCP tools before their full schemas are loaded."
-                      : entry.kind === "skill-header"
-                        ? "Skill header: reusable instruction metadata made available at session boot."
-                        : entry.kind === "system"
-                          ? "System tool headers: host-provided tool descriptions and parameter schemas available to the model."
-                          : "Observed system prompt: host and model guidance that establishes behavior before the first message."
-                  }
-                >
-                  <span>{entry.name}</span>
-                  <small>{entry.detail}</small>
-                  <strong>{compact(entry.tokens)}</strong>
-                </TimelineSectionTooltip>
-              ))}
+              <div className="flow-boot-list">
+                {flowBootEntries.map((entry) => (
+                  <TimelineSectionTooltip
+                    key={entry.id}
+                    className={`flow-boot-entry boot-${entry.kind}`}
+                    label={
+                      entry.kind === "mcp-catalog"
+                        ? "Deferred MCP catalog: lightweight metadata that advertises connected MCP tools before their full schemas are loaded."
+                        : entry.kind === "skill-header"
+                          ? "Skill header: reusable instruction metadata made available at session boot."
+                          : entry.kind === "system"
+                            ? "System tool headers: host-provided tool descriptions and parameter schemas available to the model."
+                            : "Observed system prompt: host and model guidance that establishes behavior before the first message."
+                    }
+                  >
+                    <span>{entry.name}</span>
+                    <small>{entry.detail}</small>
+                    <strong>{compact(entry.tokens)}</strong>
+                  </TimelineSectionTooltip>
+                ))}
+              </div>
             </div>
             {entries.map((entry, index) => {
-              const retainedBefore =
-                flowBase +
-                entries
-                  .slice(0, index)
-                  .reduce((total, previous) => total + previous.tokens, 0);
-              const totalCost = nextRequestCost(retainedBefore + entry.tokens);
-              const addedCost = totalCost - nextRequestCost(retainedBefore);
-              const reasoningCost = entry.reasoningTokens
-                ? requestCost(0, 0, entry.reasoningTokens, currentPrice, false)
-                : 0;
+              const turn = turns[index];
               return (
                 <div
                   className={`timeline-entry ${entry.cached ? "cached-entry" : ""}`}
@@ -1489,17 +1549,88 @@ export function FlowLabView() {
                         ? "CACHED"
                         : "RETAINED"}
                   </span>
+                                  <details className="cost-tree">
+                    <summary
+                      title={
+                        entry.kind === "message"
+                          ? "Cost of the request that produced this turn. Click to expand cached context vs new tokens."
+                          : "A tool or skill result is not a turn, but the model call that consumes it resends the whole context. Click to expand cached context vs new tokens."
+                      }
+                    >
+                      <span className="tree-main">
+                        <b>${turn.total.toFixed(4)}</b> {entry.kind === "message" ? "this turn" : "this request"}
+                        {turn.miss && <em className="tree-miss-badge">CACHE MISS</em>}
+                      </span>
+                      <span
+                        className={`tree-session ${index < entries.length - 1 ? "is-stale" : ""}`}
+                        title={index < entries.length - 1 ? "Running total at this point in the session. Superseded: later turns have added to it." : "Current session total: the sum of every turn's cost so far."}
+                      >
+                        ${turn.cumulative.toFixed(2)} session so far
+                      </span>
+                    </summary>
+                    <div className="tree-children">
+                      {turn.miss && (
+                        <div
+                          className="tree-node tree-cached tree-miss"
+                          title="Cache miss (expired TTL or changed prefix): nothing can be read, so the model processes the whole prefix again and caches it. It is billed as cache creation at 1.25x the input rate (5-minute TTL) instead of the cheap cache-read rate."
+                        >
+                          <span>
+                            cache miss: caching prefix
+                            <i>{compact(turn.contextTokens)} × {writeRateLabel(turn)}</i>
+                          </span>
+                          <b>${turn.reread.toFixed(4)}</b>
+                        </div>
+                      )}
+                      <div
+                        className="tree-node tree-write"
+                        title={useCachedInputRate ? "cache_creation_input_tokens: the previous answer plus the newly appended input are processed and stored in the cache. Billed once at 1.25x the input rate (5-minute TTL) in place of the plain input price, then read back cheaply on later requests." : "New input at the plain input rate (caching is off)."}
+                      >
+                        <span>
+                          {useCachedInputRate ? "caching new input" : "new input"}
+                          <i>{compact(turn.writeTokens)} × {useCachedInputRate ? writeRateLabel(turn) : `$${turn.writeRate.toFixed(2)}/M`}</i>
+                        </span>
+                        <b>${turn.write.toFixed(4)}</b>
+                      </div>
+                      {turn.miss ? (
+                        <div
+                          className="tree-node tree-read-none"
+                          title="The model still processed the whole prompt, but none of it came from the cache: it had expired (or the prefix changed), so cache_read_input_tokens is 0. The prefix was processed and cached in the cache miss row above instead."
+                        >
+                          <span>
+                            input from cache
+                            <i>0 · cache expired</i>
+                          </span>
+                          <b>$0.0000</b>
+                        </div>
+                      ) : (
+                        <div
+                          className="tree-node tree-cached"
+                          title="cache_read_input_tokens: the model processes the whole prompt on every request. Tokens already in the cache are served from it at the cheap cache-read rate instead of being recomputed and billed again. This part grows with every turn."
+                        >
+                          <span>
+                            {useCachedInputRate ? "input from cache" : "context (uncached)"}
+                            <i>{compact(turn.contextTokens)} × ${turn.readRate.toFixed(2)}/M</i>
+                          </span>
+                          <b>${turn.reread.toFixed(4)}</b>
+                        </div>
+                      )}
+                      {turn.generatedTokens > 0 && (
+                        <div className="tree-node tree-output" title="Generated this turn (thinking + answer), billed at the output rate.">
+                          <span>
+                            output (thinking + answer)
+                            <i>{compact(turn.generatedTokens)} × ${turn.price.output.toFixed(2)}/M</i>
+                          </span>
+                          <b>${turn.output.toFixed(4)}</b>
+                        </div>
+                      )}
+                    </div>
+                  </details>
                 </div>
                 <span className="entry-tokens mono">
                   +{formatNumber(entry.tokens)}
                   {entry.summarized && (
                     <small>was {formatNumber(entry.originalTokens)}</small>
                   )}
-                  <small className="entry-cost">+${addedCost.toFixed(4)} next request</small>
-                  {reasoningCost > 0 && (
-                    <small className="entry-reasoning-cost">+${reasoningCost.toFixed(4)} reasoning output</small>
-                  )}
-                  <small className="entry-cost-total">${totalCost.toFixed(4)} total</small>
                 </span>
               </div>
               );
@@ -1510,10 +1641,6 @@ export function FlowLabView() {
                 Running simulated action...
               </div>
             )}
-          </div>
-          <div className="flow-notice" role="status">
-            <Info size={15} />
-            <span>{notice}</span>
           </div>
         </section>
       </div>

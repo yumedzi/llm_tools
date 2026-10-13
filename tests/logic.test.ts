@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { allocationTotal, emulateLongConversation, flowMaxCapacity, sessionSpend, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationOutputTokens, conversationReasoningMaxTokens, conversationReasoningMinTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelGroups, modelPriceOptions, models, priceAt, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, visualChunks, wordCount } from '../src/logic.ts';
+import { allocationTotal, emulateLongConversation, flowMaxCapacity, characterCount, compactEntries, compareModelTokens, contextPreset, conversationImageInputTokens, conversationImageTokens, conversationInputTokens, conversationOutputTokens, conversationReasoningTokens, countModelTokens, estimateTokens, fitAllocations, fitAmounts, flowBase, flowBootEntries, flowCapacity, flowMcpTools, flowUsed, hasLoadedMcpSchema, inputCost, modelGroups, modelPriceOptions, models, priceAt, requestCost, reservedContextBuffer, retainCall, retainConversation, samples, turnCosts, visualChunks, wordCount } from '../src/logic.ts';
 import { claude5Pieces, countClaude5Tokens, countClaudeTokens, countOpenAITokens, countTokens, openAITokenIds, openAITokenPieces, tokenPieces } from '../src/tokenizers.ts';
 import type { FlowEntry } from '../src/logic.ts';
 import { causalAttention, createTransformerTrace, decodeCandidates, seededSample, softmax } from '../src/transformerLogic.ts';
@@ -214,21 +214,14 @@ describe('Retained tool and skill context', () => {
     assert.equal(flowBase, 18800);
     assert.deepEqual(flowBootEntries.map(entry => entry.tokens), [7800, 10000, 600, 240, 160]);
   });
-  it('generates assistant outputs between 2K and 3K tokens', () => {
-    assert.equal(conversationOutputTokens(() => 0), 2000);
-    assert.equal(conversationOutputTokens(() => 0.999999), 3000);
-    assert.equal(conversationOutputTokens(() => 1), 3000);
+  it('uses fixed conversation sizes: 2K input, 4K output, 6K thinking', () => {
+    assert.equal(conversationInputTokens, 2000);
+    assert.equal(conversationOutputTokens, 4000);
+    assert.equal(conversationReasoningTokens, 6000);
   });
   it('models a standard-tier 1080p image attachment as 1,560 visual tokens', () => {
     assert.equal(conversationImageTokens, 1560);
-    assert.equal(conversationImageInputTokens, 2160);
-  });
-  it('varies reasoning tokens between 800 and 1,600 in addition to visible output', () => {
-    assert.equal(conversationReasoningMinTokens, 800);
-    assert.equal(conversationReasoningMaxTokens, 1600);
-    assert.equal(conversationReasoningTokens(() => 0), 800);
-    assert.equal(conversationReasoningTokens(() => 0.999999), 1600);
-    assert.equal(conversationReasoningTokens(() => 1), 1600);
+    assert.equal(conversationImageInputTokens, 3560);
   });
   it('accumulates identical calls as separate retained responses', () => {
     const first = retainCall([], call())!;
@@ -285,36 +278,69 @@ describe('Retained tool and skill context', () => {
 });
 
 describe('long conversation emulation', () => {
-  const seeded = () => { let x = 0.42; return () => (x = (x * 9301 + 49297) % 233280 / 233280); };
   it('adds 50 rounds with tool calls, skills, and one schema per tool', () => {
-    const { entries, turns } = emulateLongConversation([], { random: seeded(), startId: 1 });
+    const { entries, turns } = emulateLongConversation([], { startId: 1 });
     assert.equal(turns, 50);
     const rounds = entries.filter(e => e.kind === 'message').map(e => e.round);
     assert.deepEqual(rounds, Array.from({ length: 50 }, (_, i) => i + 1));
     assert.equal(entries.filter(e => e.kind === 'mcp-schema').length, 2);
-    assert.equal(entries.filter(e => e.kind === 'mcp-result').length, 10);
-    assert.equal(entries.filter(e => e.kind === 'skill-result').length, 5);
+    assert.equal(entries.filter(e => e.kind === 'mcp-result').length, 9);
+    assert.equal(entries.filter(e => e.kind === 'skill-result').length, 4);
+    assert.equal(entries.at(-1)!.kind, 'message');
+    assert.equal(entries.at(-2)!.kind, 'message');
+    assert.ok(entries.filter(e => e.kind === 'message').every(e => e.inputTokens === 2000 && e.outputTokens === 4000));
     assert.equal(new Set(entries.map(e => e.id)).size, entries.length);
     assert.ok(flowUsed(entries) > 150000 && flowUsed(entries) < flowMaxCapacity);
     assert.equal(entries.at(-1)!.cached, false);
     assert.ok(entries.slice(0, -1).every(e => e.cached));
   });
   it('stops at whole turns when the window fills', () => {
-    const { entries, turns } = emulateLongConversation([], { capacity: 64000, random: seeded(), startId: 1 });
+    const { entries, turns } = emulateLongConversation([], { capacity: 64000, startId: 1 });
     assert.ok(turns > 0 && turns < 50);
     assert.ok(flowUsed(entries) <= 64000);
     assert.equal(entries.filter(e => e.kind === 'message').length, turns);
   });
-  it('sums the cost of each request and grows faster than the context', () => {
-    const cost = (tokens: number) => tokens / 1000000;
-    const { entries } = emulateLongConversation([], { random: seeded(), startId: 1 });
-    let retained = flowBase;
-    let manual = 0;
-    for (const e of entries) { manual += cost(retained); retained += e.tokens; }
-    const spend = sessionSpend(entries, cost);
-    assert.equal(spend.requests, entries.length);
-    assert.ok(Math.abs(spend.total - manual) < 1e-12);
-    const half = sessionSpend(entries.slice(0, Math.floor(entries.length / 2)), cost).total;
-    assert.ok(spend.total > 2.5 * half);
+  it('prices a cache miss as a 1.25x write of the whole prefix instead of a cheap read', () => {
+    const pricing = [{ label: 'flat', input: 10, cachedInput: 0.25, output: 50 }];
+    const { entries } = emulateLongConversation([], { startId: 1 });
+    const missed = entries.map((entry, index) => index === 5 ? { ...entry, cacheMiss: true } : entry);
+    const hit = turnCosts(entries, pricing, true)[5];
+    const miss = turnCosts(missed, pricing, true)[5];
+    assert.equal(miss.miss, true);
+    assert.equal(miss.contextTokens, hit.contextTokens);
+    assert.ok(Math.abs(miss.reread - hit.contextTokens * 12.5 / 1e6) < 1e-12);
+    assert.ok(Math.abs(miss.reread / hit.reread - 50) < 1e-9);
+    assert.equal(miss.write, hit.write);
+    assert.equal(miss.output, hit.output);
+  });
+  it('writes the previous answer plus new input once (1.25x), then reads the prefix cheaply', () => {
+    const pricing = [{ label: 'flat', input: 10, cachedInput: 0.25, output: 50 }];
+    const { entries } = emulateLongConversation([], { startId: 1, reasoning: true });
+    const turns = turnCosts(entries, pricing, true);
+    assert.equal(turns.length, entries.length);
+    const generated = (entry: typeof entries[number]) => (entry.outputTokens ?? 0) + (entry.reasoningTokens ?? 0);
+    // First request: nothing generated before it, so the whole boot context is read.
+    assert.equal(turns[0].contextTokens, flowBase);
+    assert.equal(turns[0].writeTokens, entries[0].tokens - generated(entries[0]));
+    assert.ok(Math.abs(turns[0].reread - flowBase * 0.25 / 1e6) < 1e-12);
+    assert.ok(Math.abs(turns[0].write - turns[0].writeTokens * 12.5 / 1e6) < 1e-12);
+    assert.ok(Math.abs(turns[0].output - generated(entries[0]) * 50 / 1e6) < 1e-12);
+    // Next request writes the previous answer (first time it is cached) and reads the rest.
+    assert.equal(turns[1].writeTokens, generated(entries[0]) + entries[1].tokens - generated(entries[1]));
+    assert.equal(turns[1].contextTokens, flowBase + entries[0].tokens - generated(entries[0]));
+    // Every token is written exactly once, except the latest answer which has not been sent back yet.
+    const written = turns.reduce((sum, turn) => sum + turn.writeTokens, 0);
+    assert.equal(flowBase + written + generated(entries.at(-1)!), flowBase + entries.reduce((sum, e) => sum + e.tokens, 0));
+    const last = turns.at(-1)!;
+    assert.ok(last.reread > 8 * turns[0].reread);
+    assert.ok(Math.abs(last.cumulative - turns.reduce((sum, turn) => sum + turn.total, 0)) < 1e-12);
+    assert.ok(turns.every((turn, index) => index === 0 || turn.reread > turns[index - 1].reread));
+  });
+  it('charges no cache premium or discount when caching is off', () => {
+    const pricing = [{ label: 'flat', input: 10, cachedInput: 0.25, output: 50 }];
+    const { entries } = emulateLongConversation([], { startId: 1 });
+    const turn = turnCosts(entries, pricing, false)[3];
+    assert.equal(turn.readRate, 10);
+    assert.equal(turn.writeRate, 10);
   });
 });

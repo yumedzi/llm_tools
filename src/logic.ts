@@ -131,21 +131,13 @@ export const flowCapacity: FlowCapacity = 64000;
 export const flowMaxCapacity: FlowCapacity = 1000000;
 export const flowBase = flowBootEntries.reduce((total, entry) => total + entry.tokens, 0);
 export type FlowEntryKind = 'mcp-schema' | 'mcp-result' | 'skill-result' | 'message';
-export type FlowEntry = { id: number; kind: FlowEntryKind; name: string; tokens: number; originalTokens: number; summarized: boolean; toolId?: string; round?: number; cached?: boolean; inputTokens?: number; imageTokens?: number; outputTokens?: number; reasoningTokens?: number };
-export const conversationInputTokens = 600;
+export type FlowEntry = { id: number; kind: FlowEntryKind; name: string; tokens: number; originalTokens: number; summarized: boolean; toolId?: string; round?: number; cached?: boolean; inputTokens?: number; imageTokens?: number; outputTokens?: number; reasoningTokens?: number; cacheMiss?: boolean };
+// Fixed sizes keep the demo repeatable: a 2K prompt (code or logs pasted in), 6K of thinking and a 4K answer.
+export const conversationInputTokens = 2000;
 export const conversationImageTokens = 1560;
 export const conversationImageInputTokens = conversationInputTokens + conversationImageTokens;
-export const conversationReasoningMinTokens = 800;
-export const conversationReasoningMaxTokens = 1600;
-export function conversationReasoningTokens(random = Math.random): number {
-  return conversationReasoningMinTokens + Math.floor(
-    Math.max(0, Math.min(0.999999, random())) *
-      (conversationReasoningMaxTokens - conversationReasoningMinTokens + 1),
-  );
-}
-export function conversationOutputTokens(random = Math.random): number {
-  return 2000 + Math.floor(Math.max(0, Math.min(0.999999, random())) * 1001);
-}
+export const conversationOutputTokens = 4000;
+export const conversationReasoningTokens = 6000;
 export const flowMcpTools = {
   search: { schemaTokens: 2400, resultTokens: 1200 },
   database: { schemaTokens: 4800, resultTokens: 2200 },
@@ -162,12 +154,13 @@ export function retainConversation(entries: FlowEntry[], entry: FlowEntry, capac
   const round = Math.max(0, ...entries.filter(item => item.kind === 'message').map(item => item.round ?? 0)) + 1;
   return retainCall(entries, { ...entry, kind: 'message', round, cached: false }, capacity);
 }
-export type EmulationOptions = { turns?: number; capacity?: number; reasoning?: boolean; random?: () => number; startId?: number };
+export type EmulationOptions = { turns?: number; capacity?: number; reasoning?: boolean; startId?: number };
 export const emulatedConversationTurns = 50;
 // Fast-forwards a session: one conversation round per turn, an MCP call every
 // 5th turn (alternating search/database) and a skill result every 10th turn.
+// The final turn is a plain conversation round, so the session ends on a message.
 export function emulateLongConversation(entries: FlowEntry[], options: EmulationOptions = {}): { entries: FlowEntry[]; turns: number } {
-  const { turns = emulatedConversationTurns, capacity = flowMaxCapacity, reasoning = false, random = Math.random, startId = Date.now() } = options;
+  const { turns = emulatedConversationTurns, capacity = flowMaxCapacity, reasoning = false, startId = Date.now() } = options;
   let next = entries;
   let id = startId;
   let completed = 0;
@@ -180,33 +173,53 @@ export function emulateLongConversation(entries: FlowEntry[], options: Emulation
   };
   for (let turn = 1; turn <= turns; turn += 1) {
     const snapshot = next;
-    if (turn % 5 === 0) {
+    if (turn % 5 === 0 && turn < turns) {
       const toolId = (turn / 5) % 2 === 1 ? 'search' : 'database';
       const tool = flowMcpTools[toolId];
       const name = toolId === 'search' ? 'Search documents' : 'Query database';
       if (!hasLoadedMcpSchema(next, toolId) && !add({ kind: 'mcp-schema', name: `${name} schema loaded`, tokens: tool.schemaTokens, toolId })) { next = snapshot; break; }
       if (!add({ kind: 'mcp-result', name, tokens: tool.resultTokens, toolId })) { next = snapshot; break; }
     }
-    if (turn % 10 === 0) {
+    if (turn % 10 === 0 && turn < turns) {
       const review = (turn / 10) % 2 === 1;
       if (!add({ kind: 'skill-result', name: review ? 'Code review skill' : 'Summarizer skill', tokens: review ? 1800 : 900 })) { next = snapshot; break; }
     }
-    const outputTokens = conversationOutputTokens(random);
-    const reasoningTokens = reasoning ? conversationReasoningTokens(random) : 0;
+    const outputTokens = conversationOutputTokens;
+    const reasoningTokens = reasoning ? conversationReasoningTokens : 0;
     if (!add({ kind: 'message', name: 'Continue conversation', tokens: conversationInputTokens + outputTokens + reasoningTokens, inputTokens: conversationInputTokens, outputTokens, reasoningTokens: reasoningTokens || undefined }, true)) { next = snapshot; break; }
     completed = turn;
   }
   return { entries: next, turns: completed };
 }
-// Each retained entry was produced by one request that resent everything before it.
-export function sessionSpend(entries: FlowEntry[], costOf: (retainedTokens: number) => number): { requests: number; total: number } {
+// Cache writes cost 1.25x the input rate for the 5-minute TTL (2x for the 1-hour TTL).
+export const cacheWriteMultiplier = 1.25;
+export type TurnCost = { miss: boolean; contextTokens: number; writeTokens: number; generatedTokens: number; price: ModelPrice; readRate: number; writeRate: number; reread: number; write: number; output: number; total: number; cumulative: number };
+// Each retained entry was produced by one request. In a healthy cached loop that request reads the
+// prefix already in cache (the snowballing part), writes only the delta (the previous answer plus
+// the newly appended input), and generates its own output. A cache miss rewrites the whole prefix.
+export function turnCosts(entries: FlowEntry[], pricing: readonly ModelPrice[], useCachedInputRate: boolean): TurnCost[] {
   let retained = flowBase;
-  let total = 0;
-  for (const entry of entries) {
-    total += costOf(retained);
+  let previousGenerated = 0;
+  let cumulative = 0;
+  return entries.map(entry => {
+    const generated = (entry.outputTokens ?? 0) + (entry.reasoningTokens ?? 0);
+    const freshTokens = entry.tokens - generated;
+    const price = priceAt(pricing, retained + freshTokens);
+    const miss = !!entry.cacheMiss && useCachedInputRate;
+    const writeRate = useCachedInputRate ? price.input * cacheWriteMultiplier : price.input;
+    const readRate = !useCachedInputRate ? price.input : miss ? writeRate : price.cachedInput;
+    const contextTokens = retained - previousGenerated;
+    const writeTokens = previousGenerated + freshTokens;
+    const reread = contextTokens * readRate / 1000000;
+    const write = writeTokens * writeRate / 1000000;
+    const output = generated * price.output / 1000000;
+    const total = reread + write + output;
+    cumulative += total;
+    const turn = { miss, contextTokens, writeTokens, generatedTokens: generated, price, readRate, writeRate, reread, write, output, total, cumulative };
     retained += entry.tokens;
-  }
-  return { requests: entries.length, total };
+    previousGenerated = generated;
+    return turn;
+  });
 }
 export function compactEntries(entries: FlowEntry[]): FlowEntry[] {
   if (!entries.length || (entries.length === 1 && entries[0].summarized)) {
